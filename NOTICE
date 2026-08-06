@@ -1,0 +1,19 @@
+kidx
+Copyright 2026 Sergey Knyazev
+
+This product includes software developed by Sergey Knyazev and the kidx
+contributors.
+
+--------------------------------------------------------------------------------
+
+This product bundles a modified copy of JuulLabs/indexeddb, which is available
+under the Apache License, Version 2.0.
+
+    indexeddb
+    Copyright Juul Labs, Inc.
+    https://github.com/JuulLabs/indexeddb
+
+The bundled sources live in kidx-core/src/webMain/vendor/ and retain their
+original `com.juul.indexeddb` package names. The upstream revision they were
+taken from, and every modification kidx makes to them, are recorded in
+kidx-core/src/webMain/vendor/VENDOR.md.

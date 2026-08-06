@@ -1,9 +1,16 @@
 # kidx — spec
 
-Status: **design only, nothing implemented yet.** This document is the full record of a design
-conversation; it exists so a next agent (human or Claude) can pick up the work without re-deriving
-any of it. Read it end to end before writing code — several approaches below were considered and
-explicitly rejected, and re-proposing them wastes a round trip.
+Status: **the build skeleton exists and the vendored engine compiles for js and wasmJs; none of kidx's
+own code is written.** This document is the full record of a design conversation; it exists so a next
+agent (human or Claude) can pick up the work without re-deriving any of it. Read it end to end before
+writing code — several approaches below were considered and explicitly rejected, and re-proposing them
+wastes a round trip.
+
+What exists on disk: `settings.gradle.kts` with one module (`kidx-core`), the Gradle wrapper, the
+binary-compatibility validator, and the vendored JuulLabs sources under
+`kidx-core/src/webMain/vendor/` with their provenance and the changes they still need recorded in
+`VENDOR.md`. Reading that code answered three open questions and contradicted one decision; both are
+folded into the text below.
 
 ## What this is
 
@@ -57,21 +64,28 @@ lost — only postponed.
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
-│  kidx-core — the DSL, platform-free                                 │
-│  Row, Field/FieldType, Store, Index, Schema/Migration, Query,        │
-│  ReadScope/WriteScope                                                │
-└────────────────────────────┬───────────────────────────────────────┘
-                              │  engine seam (internal)
-                              ▼
-┌────────────────────────────────────────────────────────────────────┐
-│  kidx-indexeddb (js/wasmJs) — the only engine                        │
-│  vendored JuulLabs/indexeddb core: transaction lifetime discipline    │
+│  kidx-core  (js + wasmJs, one `webMain` source set)                  │
+│                                                                      │
+│  src/webMain/kotlin — the DSL                                        │
+│    Row, Field/FieldType, Store, Index, Schema/Migration, Query,      │
+│    ReadScope/WriteScope                                              │
+│                                                                      │
+│  src/webMain/vendor — vendored JuulLabs/indexeddb (core + external)  │
+│    transaction lifetime discipline; see VENDOR.md                     │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-The engine seam stays **internal**: it exists so the DSL module has no platform dependency, not as a
-public extension point. There is exactly one engine and no plan for another (see "Explicitly
-rejected").
+**One module, not two.** An earlier draft split a platform-free `kidx-core` from a `kidx-indexeddb`
+engine. That split had exactly one justification — keeping the DSL free of platform types — and it
+does not survive contact with the code: `FieldType` converts values to and from `kotlin.js.JsAny`, so
+every source set here is a web source set regardless. With the justification gone and exactly one
+engine to hide, a second module would be structure for its own sake. `kidx-observe` (Roadmap) is the
+module that will genuinely be separate, because it is optional for consumers.
+
+The vendored code lives in its own source directory rather than its own module, in the upstream module
+layout (`vendor/core`, `vendor/external`), so re-checking it against a fresh clone is a `diff -r`. It
+keeps its `com.juul.indexeddb` package names — which makes both the diffing and the attribution
+obvious in every file.
 
 Full-text search is not part of kidx: it is an in-memory concern, solved independently by
 [kromus](../kromus)'s `TextIndex` (BM25).
@@ -247,23 +261,34 @@ error, which is the failure mode described in decision 6.
 
 Its cost, which must be weighed before committing: the restriction also forbids `Flow.collect`, which
 `stream()` needs. The way out is for kidx to declare its own `collect` as a scope extension, so the
-one legitimate suspending consumer is inside the allowed set. Check first whether the vendored
-JuulLabs code already uses the annotation; if it does not, this is a place where kidx can be stricter
-than upstream rather than merely as strict.
+one legitimate suspending consumer is inside the allowed set.
+
+**Verified against the vendored code:** upstream does not use the annotation anywhere. The rule lives
+in a doc comment on `openDatabase` and on `Transaction.openCursor`, and nothing enforces it — the
+cursor implementation only detects the symptom after the fact, closing the flow with
+`IllegalStateException("Send failed. Did you suspend illegally?")` when a `trySend` fails because the
+collector suspended. So this is a place where kidx can be genuinely stricter than upstream rather than
+merely as strict. Upstream's cursor contract also requires the collector not to suspend *at all* under
+`autoContinue = true`, which is why kidx's scope-scoped `collect` takes a non-suspending action.
 
 ### 6. Failure: the whole transaction, no savepoints, no nesting
 
-Nothing about this is inherited for free, and all of it is observable behaviour, so it is specified
-rather than left to the implementation:
+All of this is observable behaviour, so it is specified rather than left to the implementation. The
+first two points are **already exactly what the vendored code does** — verified, not assumed — so kidx
+inherits them rather than building them:
 
-- **An exception thrown inside the block aborts the transaction, then propagates.** This has to be
-  explicit in the implementation, not left to unwinding: an IndexedDB transaction commits by itself
-  once the event loop drains without a pending request, so an exception could otherwise escape *after*
-  the writes were already committed. kidx calls `abort()` on the way out.
+- **An exception thrown inside the block aborts the transaction, then propagates.** It cannot be left
+  to unwinding: an IndexedDB transaction commits by itself once the event loop drains without a pending
+  request, so an exception could otherwise escape *after* the writes were already committed. Upstream's
+  `writeTransaction` does `try { action() } catch (e) { abort(); awaitFailure(); throw e }` and only
+  calls `commit()` on the success path, which is precisely the required behaviour.
 - **An engine-initiated abort discards everything in the transaction**, not just the failing
   operation. A loop of `add`s inside one `db.write` is all-or-nothing — a feature, and the reason a
   batch belongs in one scope, but it also means one `ConstraintError` on record 900 undoes 899 good
-  writes.
+  writes. Confirmed in the vendored code: a request's `error` event is turned into an exception but
+  never `preventDefault()`ed, so per the IndexedDB specification it bubbles to the transaction and
+  aborts it. There is no per-operation "ignore this failure" and there cannot be one without changing
+  that.
 - **There are no savepoints and no partial rollback.** Kormium's `savepoint { }` has no analogue and
   will not get one; IndexedDB has no such concept.
 - **Scopes do not nest.** Opening `db.write` (or `db.read`) inside another scope's block deadlocks
@@ -273,8 +298,11 @@ rather than left to the implementation:
   that annotation turns out to be impractical, kidx must detect it via a coroutine-context marker and
   throw immediately, naming the enclosing scope — never hang.
 - **Concurrent scopes are safe but serialized.** Two `db.write` calls touching the same store are
-  ordered by the engine, one waiting for the other. This is where isolation comes from, and it is
-  also why long-running work does not belong inside a write scope.
+  ordered, one waiting for the other. This is where isolation comes from, and it is also why
+  long-running work does not belong inside a write scope. The vendored code makes the ordering explicit
+  rather than relying on the engine's queueing: before running the block it opens and immediately closes
+  a key cursor on the first declared store, which forces an overlapping transaction to wait for its
+  predecessor to finish instead of interleaving.
 
 ### 7. Reads are the engine's read operations, and nothing else
 
@@ -471,6 +499,12 @@ text (as opposed to ordering it) is not an ordering problem at all: that is krom
 - **`autoIncrement` is supported.** The key generator is the only database-generated value IndexedDB
   has. A primary key left absent is filled by the generator, and `add`/`put` return the key it
   assigned. This is the one legitimate use of the absent state on the write path (decision 3).
+  **This needs a change to the vendored code**, the first one: upstream exposes
+  `createObjectStore(name, keyPath)` and `createObjectStore(name, autoIncrement)` as separate
+  overloads, with no way to ask for both, while kidx needs the combination (an in-line key path *and* a
+  generator, so the generated key lands inside the record — decision 9). IndexedDB allows it and
+  `IDBCreateObjectStoreOptions` already declares both fields, so the change is additive. Recorded in
+  `VENDOR.md`.
 - **A field's stored name is its property name.** Kormium's `name = "…"` override exists because SQL
   identifiers differ from Kotlin property names and need dialect quoting; in IndexedDB a name is just
   a key in a JS object, there is no dialect, and renaming a stored property is a data migration
@@ -510,11 +544,19 @@ that, but it also does not need a history to work, which is why it goes first.
 
 - **`openDatabase(schema)`** suspends until the database is open at the schema's version, running any
   needed migrations and then the structural verification of decision 13.
-- **`onBlocked`.** If we are the one upgrading and another context still holds the database open at an
-  older version, the open request sits in `blocked` and waits. kidx invokes an `onBlocked` callback so
-  the application can say something useful ("close other tabs to finish updating") instead of
-  appearing frozen. There is no built-in timeout: how long to wait, and whether to give up, is the
-  application's policy.
+- **Being blocked fails fast; it does not wait.** If we are the one upgrading and another context still
+  holds the database open at an older version, IndexedDB fires `blocked` and keeps the request pending —
+  `success` would still arrive if the other connection closed. The vendored code deliberately does not
+  wait for that: it throws on `blocked`, for `openDatabase` and `deleteDatabase` alike. kidx keeps that
+  behaviour and surfaces it as a typed failure naming the database, because the alternative is a call
+  that hangs for an unbounded time on something the library cannot influence. Retry policy — show
+  "close other tabs to finish updating", then try again — belongs to the application, exactly as
+  Kormium ships `ConcurrencyConflictException` and no retry loop.
+
+  (An earlier draft of this decision described an `onBlocked` callback invoked while the open waited.
+  That was written before the vendored code was read; it does not wait, and making it wait would mean
+  changing the one part of that code kidx vendored it for. If waiting is ever wanted, it is a
+  `VENDOR.md` change, not a kidx-side one.)
 - **`onVersionChange`** is the mirror case: *we* hold an older version and another context wants to
   upgrade. Default behaviour is to close our connection, so the other context is never blocked
   indefinitely, after which our operations fail with an error saying the schema was upgraded elsewhere
@@ -530,9 +572,9 @@ that, but it also does not need a history to work, which is why it goes first.
 - **`openDatabase` is not a singleton.** Two calls for the same schema give two independent
   connections. kidx does not cache or deduplicate them, so an application that wants one connection
   holds onto it itself.
-- **`deleteDatabase(name)`** is native (`indexedDB.deleteDatabase`) and is in v1 because both "reset
-  all data" and every test suite need it. It takes the same `onBlocked` callback: open connections
-  block a delete exactly as they block an upgrade.
+- **`deleteDatabase(name)`** is native (`indexedDB.deleteDatabase`), exists in the vendored code
+  already, and is in v1 because both "reset all data" and every test suite need it. Open connections
+  block a delete exactly as they block an upgrade, and it fails the same way.
 
 ## The DSL (design sketch — not compiled, not tested)
 
@@ -663,13 +705,13 @@ class Schema(val databaseName: String, val migrations: List<Migration>) {
 
 // ---- lifecycle (decision 14) ----
 
+/** Throws [DatabaseBlockedException] if another context holds an older version open (decision 14). */
 suspend fun openDatabase(
     schema: Schema,
-    onBlocked: () -> Unit = {},                                        // another context holds an older version
     onVersionChange: suspend (VersionChangeSignal) -> Unit = { it.close() },
 ): Database
 
-suspend fun deleteDatabase(name: String, onBlocked: () -> Unit = {})
+suspend fun deleteDatabase(name: String)
 
 class Database internal constructor(/* … */) {
     suspend fun <T> read(vararg stores: Store<*>, block: suspend ReadScope.() -> T): T
@@ -771,7 +813,12 @@ val schema = Schema("app", listOf(
     )),
 ))
 
-val db = openDatabase(schema, onBlocked = { ui.warn("Close other tabs to finish updating") })
+val db = try {
+    openDatabase(schema)
+} catch (e: DatabaseBlockedException) {
+    // Another context holds an older version open; retry policy is the application's (decision 14).
+    ui.warn("Close other tabs to finish updating"); return
+}
 ```
 
 ```kotlin
@@ -951,12 +998,13 @@ costs, because the reason for cutting it is not that it is worthless.
   isolation, and it needs `unset()` back. Watch the `Blob` case: a read-modify-write rewrites the
   whole record, blob included (decision 8). Until it exists, the compare-and-set recipe above is the
   supported way to do a targeted change.
-- **Insert-or-ignore.** `add` plus catching a `ConstraintError`. **Verify first whether it is even
-  implementable that way**: in IndexedDB a failed request's error event aborts the whole transaction
-  unless it is prevented, so "ignore and carry on" may not survive the wrapper — in which case it has
-  to be `get` + `add`, a different cost that has to be visible in the name and KDoc. The same
-  question governs what happens to a transaction when a `unique` index rejects a plain `add`
-  (decision 6 says the whole transaction goes; confirm against the vendored code).
+- **Insert-or-ignore.** `add` plus catching a `ConstraintError` — **verified impossible as written**.
+  The vendored request wrapper turns an `error` event into an exception without calling
+  `preventDefault()` on it, so by the time the exception is catchable the transaction is already being
+  aborted and every other write in it is lost. Two ways forward, both with a visible cost: a
+  `preventDefault()`-ing request variant in the vendored code (a change to the code kidx was careful
+  about touching), or `get`-then-`add`, which is two operations and should be named so that it looks
+  like two. The same finding is why decision 6 states that one rejected `add` discards the whole scope.
 - **Migration journal with checksums.** Kormium records each applied migration's id and checksum and
   fails fast if an already-applied one changed (`MigrationChecksumException`) — valuable in a browser,
   where a user's database at version N was built by whatever code shipped then and cannot be re-run.
@@ -990,28 +1038,33 @@ costs, because the reason for cutting it is not that it is worthless.
 
 ## Open questions for whoever continues this
 
-1. **Module layout.** The sketch assumes `kidx-core` (DSL, platform-free) and `kidx-indexeddb` (the
-   engine, js/wasmJs), mirroring Kormium's core/backend split. Vendoring (decision 4) adds a
-   question: does the vendored JuulLabs core sit inside `kidx-indexeddb`, or in its own module (the
-   way `kormium-wasm-driver` is separate from the backends that share it)? A separate module keeps
-   the vendored code, its `NOTICE` and its upstream-diff discipline in one clearly-marked place. Not
-   decided; no `settings.gradle.kts` exists yet. Artifact coordinates and whether there is a
-   `kidx-bom` (as Kormium has) are part of the same decision.
-2. **Kotlin/Wasm target.** JuulLabs' core is organized around a `webMain` source set covering js and
-   wasmJs, so both targets should be reachable — verify against the actual vendored sources before
-   promising it in a README.
-3. **`@RestrictsSuspension`** (decision 5): confirm the vendored code's own stance, and confirm that
-   a scope-scoped `collect` is enough to keep `stream()` usable under the restriction. If it is not,
-   the fallback is a coroutine-context marker plus a runtime check, and that trade needs recording.
-4. **Test strategy** — browser-only, `fake-indexeddb`-first, or both (see "Testing").
-5. **Error hierarchy.** Kormium's typed exceptions (`ResultMappingException`,
+Three earlier questions are now answered by the skeleton and by reading the vendored code, and are
+folded into the decisions above: **module layout** (one module — see "Architecture"),
+**Kotlin/Wasm** (`js { browser() }` and `wasmJs { browser() }` both compile the vendored sources; note
+that upstream configures *no* `nodejs()` target, which bears on the test question below), and
+**`@RestrictsSuspension`** (upstream does not use it — decision 5).
+
+1. **Does the vendored API stay public?** The vendored sources are `public` and, in one module under
+   `explicitApi()`, they land in kidx's own ABI dump — so `com.juul.indexeddb` becomes part of kidx's
+   published surface, which undercuts the "zero third-party surface for consumers" half of decision 4.
+   The fix is a mechanical `public` → `internal` pass over `vendor/`, which stays re-appliable after
+   each upstream port precisely because it is mechanical. Not done yet: it is a large diff against
+   upstream and worth deciding deliberately.
+2. **Test strategy** — browser-only, `fake-indexeddb`-first, or both (see "Testing"). Sharpened by the
+   skeleton: the vendored build declares only `browser()`, so a Node-based test target is something
+   kidx would have to add rather than inherit.
+3. **Artifact coordinates and publishing.** `io.github.kidx` is the group; whether there is a
+   `kidx-bom` (as Kormium has) only matters once there is more than one module, i.e. when
+   `kidx-observe` lands. The publish plugin is not wired up yet.
+4. **Error hierarchy.** Kormium's typed exceptions (`ResultMappingException`,
    `ConcurrencyConflictException`, `MigrationChecksumException`) have IndexedDB counterparts worth
-   naming: `ConstraintError`, `QuotaExceededError`, `AbortError`, IndexedDB-unavailable, plus kidx's
-   own hydrate-time (absent / null / wrong type — decision 9), query-build-time and
+   naming: `ConstraintError`, `QuotaExceededError`, `AbortError`, blocked-by-another-context,
+   IndexedDB-unavailable (upstream raises a bare `IllegalStateException` for it, which kidx should
+   wrap), plus kidx's own hydrate-time (absent / null / wrong type — decision 9), query-build-time and
    schema-verification failures. The message quality Kormium achieves (name the store, the field, the
    expected type, and what to do) is a feature, not a nicety — budget for it.
-6. **No code has been written.** Everything under "The DSL" is a sketch for shape and ergonomics, not
-   verified to compile.
+5. **None of kidx's own code is written.** Everything under "The DSL" is a sketch for shape and
+   ergonomics, not verified to compile. What compiles today is the vendored engine and nothing else.
 
 ## Conventions to adopt from day one
 
