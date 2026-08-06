@@ -21,6 +21,11 @@ kotlin {
     explicitApi()
 
     js {
+        // Node runs the test suite: it needs no browser binary (the Kotlin plugin fetches its own
+        // Node), and IndexedDB itself comes from `fake-indexeddb`. Browser tests are the only place
+        // the real engine can be exercised, so they exist too — gated on a browser being installed,
+        // the way kormium gates its iOS-simulator tests.
+        nodejs()
         browser()
     }
 
