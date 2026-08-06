@@ -9,6 +9,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 import kotlin.js.JsAny
 import com.juul.indexeddb.Database as Driver
 import com.juul.indexeddb.deleteDatabase as driverDeleteDatabase
@@ -61,6 +65,17 @@ public suspend fun openDatabase(
         }
     } catch (e: OpenBlockedException) {
         throw DatabaseBlockedException(schema.databaseName, e)
+    } catch (e: EventException) {
+        // The one open failure with its own remedy; everything else the engine says stays generic.
+        if (jsErrorName(e.event) == "VersionError") {
+            throw DatabaseTooNewException(schema.databaseName, schema.version, e)
+        }
+        throw EngineException(
+            jsErrorName(e.event).ifEmpty { "OpenError" },
+            "IndexedDB refused to open database '${schema.databaseName}' at version ${schema.version}: " +
+                "${e.message}",
+            e,
+        )
     } catch (e: IllegalStateException) {
         // The driver's own check for a missing global; worth a typed failure of our own, since an
         // application that must work in private browsing has to branch on it.
@@ -147,8 +162,11 @@ public class Database internal constructor(
     internal suspend fun <T> read(stores: Set<String>, block: suspend ReadScope.() -> T): T {
         checkOpen()
         require(stores)
-        return translatingEngineFailures {
-            driver.transaction(*stores.toTypedArray()) { ReadScope(this, stores).block() }
+        refuseNesting(stores)
+        return withContext(InTransaction(stores)) {
+            translatingEngineFailures {
+                driver.transaction(*stores.toTypedArray()) { ReadScope(this, stores).block() }
+            }
         }
     }
 
@@ -161,8 +179,11 @@ public class Database internal constructor(
         checkOpen()
         val names = stores.map { it.storeName }.toSet()
         require(names)
-        val result = translatingEngineFailures {
-            driver.writeTransaction(*names.toTypedArray()) { WriteScope(this, names).block() }
+        refuseNesting(names)
+        val result = withContext(InTransaction(names)) {
+            translatingEngineFailures {
+                driver.writeTransaction(*names.toTypedArray()) { WriteScope(this, names).block() }
+            }
         }
         // After the commit, never before: the vendored writeTransaction awaits completion before it
         // returns, so reaching this line means the data is durable.
@@ -276,6 +297,26 @@ public class Database internal constructor(
     }
 
     /**
+     * Opening a transaction inside another one **deadlocks** as soon as the store sets overlap: the inner
+     * one waits for a store the outer one holds, and the outer cannot finish while suspended inside the
+     * inner. Never hang — say what happened and what to do (SPEC.md decision 6).
+     *
+     * This is the runtime half of the suspend discipline. It cannot catch a stray `delay` or a network
+     * call inside a scope, which would let the event loop drain and the transaction auto-commit; only
+     * `@RestrictsSuspension` could, and it does not fit here (decision 5). It does catch the failure mode
+     * that is otherwise indistinguishable from a hang.
+     */
+    private suspend fun refuseNesting(wanted: Set<String>) {
+        val outer = currentCoroutineContext()[InTransaction] ?: return
+        throw KidxException(
+            "A transaction is already open on ${outer.stores.joinToString()} in this coroutine, and " +
+                "opening another one over ${wanted.joinToString()} would deadlock: the inner waits for a " +
+                "store the outer holds. Name every store the outer read()/write() needs instead — one " +
+                "scope can span as many as you like.",
+        )
+    }
+
+    /**
      * Turns the driver's event-carrying exceptions into kidx's own, so a consumer can catch a duplicate
      * key by type without naming a vendored class. An exception thrown by the caller's own block passes
      * through untouched — it is not an engine failure, and the driver has already aborted for it.
@@ -308,6 +349,11 @@ public class Database internal constructor(
         "Schema '${schema.databaseName}' does not match the database at version ${schema.version}: " +
             "$detail.",
     )
+}
+
+/** Marks a coroutine as being inside a kidx transaction. See `Database.refuseNesting`. */
+private class InTransaction(val stores: Set<String>) : AbstractCoroutineContextElement(InTransaction) {
+    companion object Key : CoroutineContext.Key<InTransaction>
 }
 
 /** Turns a set of store names into the stores themselves, for [observe]'s generic form. */

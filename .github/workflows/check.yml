@@ -1,0 +1,45 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Both targets must compile: wasmJs is the stricter of the two (a `js(...)` call has to be a whole
+      # top-level function body, and an interface extending JsAny has to be external), so a js-only build
+      # passing proves less than it looks.
+      - name: Compile js and wasmJs
+        run: ./gradlew compileKotlinJs compileKotlinWasmJs
+
+      # The no-database tests run on both targets; the engine tests run here on fake-indexeddb.
+      - name: Test on Node
+        run: ./gradlew jsNodeTest
+
+      # The same engine suite against a real IndexedDB. This is the only run that is evidence about a
+      # browser rather than about kidx — fake-indexeddb has its own bugs (SPEC.md, "Testing").
+      - name: Test in a browser
+        run: ./gradlew jsBrowserTest wasmJsBrowserTest -PenableBrowserTests=true
+
+      # The public ABI is the review artifact: a deliberate API change means committing an apiDump diff.
+      - name: Check the public ABI
+        run: ./gradlew apiCheck
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: build/reports/tests

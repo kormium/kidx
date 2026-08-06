@@ -160,6 +160,13 @@ final class io.github.kidx/DatabaseBlockedException : io.github.kidx/KidxExcepti
 
 final class io.github.kidx/DatabaseClosedException : io.github.kidx/KidxException // io.github.kidx/DatabaseClosedException|null[0]
 
+final class io.github.kidx/DatabaseTooNewException : io.github.kidx/EngineException { // io.github.kidx/DatabaseTooNewException|null[0]
+    final val databaseName // io.github.kidx/DatabaseTooNewException.databaseName|{}databaseName[0]
+        final fun <get-databaseName>(): kotlin/String // io.github.kidx/DatabaseTooNewException.databaseName.<get-databaseName>|<get-databaseName>(){}[0]
+    final val declaredVersion // io.github.kidx/DatabaseTooNewException.declaredVersion|{}declaredVersion[0]
+        final fun <get-declaredVersion>(): kotlin/Int // io.github.kidx/DatabaseTooNewException.declaredVersion.<get-declaredVersion>|<get-declaredVersion>(){}[0]
+}
+
 final class io.github.kidx/FieldTypeException : io.github.kidx/KidxException { // io.github.kidx/FieldTypeException|null[0]
     constructor <init>(kotlin/String) // io.github.kidx/FieldTypeException.<init>|<init>(kotlin.String){}[0]
 }

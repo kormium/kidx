@@ -60,3 +60,23 @@ public class QuotaExceededException internal constructor(
     message: String,
     cause: Throwable?,
 ) : EngineException("QuotaExceededError", message, cause)
+
+/**
+ * The stored database is at a **higher** version than this code declares: newer code ran here before.
+ * IndexedDB will not downgrade, and it should not — the newer schema may hold data this code cannot
+ * read.
+ *
+ * Its own type because the remedy is different from every other open failure: not "close other tabs",
+ * not "retry", but "this build is behind — reload or update".
+ */
+public class DatabaseTooNewException internal constructor(
+    public val databaseName: String,
+    public val declaredVersion: Int,
+    cause: Throwable?,
+) : EngineException(
+    "VersionError",
+    "Database '$databaseName' on disk is newer than the schema this code declares (version " +
+        "$declaredVersion). Newer code has already run here, and IndexedDB does not downgrade — reload " +
+        "or update the application. Deleting the database would lose the data the newer schema wrote.",
+    cause,
+)

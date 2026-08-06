@@ -1239,13 +1239,11 @@ family for what the engine reports).
 2. **Browser tests.** Declared and unwritten. Everything genuinely engine-specific — real abort
    behaviour, real key ordering, quota — is only trustworthy there, and `fake-indexeddb` passing is not
    evidence about a browser. This is now the largest untested area.
-3. **Publishing a release.** The build publishes (`io.github.kidx:kidx`, verified against Maven local)
-   and signs when a key is present, but nothing has been released: no version policy, no CI workflow, no
-   `CHANGELOG.md`.
-4. **Which engine failures deserve their own type.** `ConstraintViolationException` and
-   `QuotaExceededException` exist; everything else arrives as `EngineException` carrying the
-   `DOMException.name`. `AbortError`, `VersionError` and `DataError` are the candidates — each only
-   worth splitting out if an application would genuinely handle it differently.
+3. **Releasing.** The build publishes (`io.github.kidx:kidx`, verified against Maven local), signs when a
+   key is present, and CI checks both targets, both test runners and the ABI — but nothing has been
+   released. What is missing is the decision of *when*: two breaking changes are wanted before `1.0`
+   (index arity, and whatever enforces the suspend discipline), so a `0.1.0` published now is a promise
+   to break it twice.
 
 ## Conventions to adopt from day one
 

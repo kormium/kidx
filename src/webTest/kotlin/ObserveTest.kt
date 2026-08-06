@@ -42,7 +42,7 @@ class ObserveTest {
 
     /** See DatabaseTest.dbTest: an async `@BeforeTest` is not awaited by the JS test runner. */
     private fun dbTest(block: suspend kotlinx.coroutines.test.TestScope.(Database) -> Unit) = runTest {
-        installFakeIndexedDb()
+        installIndexedDb()
         deleteDatabase(schema.databaseName)
         val db = openDatabase(schema)
         try {

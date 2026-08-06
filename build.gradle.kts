@@ -67,6 +67,15 @@ kotlin {
     }
 }
 
+// Browser tests are the only place the real engine can be exercised (SPEC.md, "Testing"), but they need
+// a browser binary that most machines and the default CI image do not have — without one Karma fails and
+// takes `check` with it. Off unless asked for; the CI workflow that installs a browser passes the flag.
+val browserTestsEnabled = providers.gradleProperty("enableBrowserTests").orNull.toBoolean()
+
+tasks.matching { it.name in setOf("jsBrowserTest", "wasmJsBrowserTest") }.configureEach {
+    onlyIf("browser tests need -PenableBrowserTests=true and an installed browser") { browserTestsEnabled }
+}
+
 mavenPublishing {
     publishToMavenCentral()
 

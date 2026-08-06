@@ -12,7 +12,7 @@ class EngineSmokeTest {
 
     @Test
     fun theVendoredEngineOpensADatabaseUnderNode() = runTest {
-        installFakeIndexedDb()
+        installIndexedDb()
         deleteDatabase("kidx-smoke")
         val db = openDatabase("kidx-smoke", 1) { database, _, _ ->
             database.createObjectStore("things", KeyPath("id"))

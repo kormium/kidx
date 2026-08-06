@@ -44,7 +44,7 @@ class DatabaseTest {
      * `@Test` returns but not one from a fixture method, so an async setup there silently does not run.
      */
     private fun dbTest(block: suspend (Database) -> Unit) = runTest {
-        installFakeIndexedDb()
+        installIndexedDb()
         deleteDatabase(appSchema.databaseName)
         val db = openDatabase(appSchema)
         try {
@@ -300,7 +300,7 @@ class DatabaseTest {
 
     @Test
     fun migrationsReplayOnlyWhatIsNew() = runTest {
-        installFakeIndexedDb()
+        installIndexedDb()
         deleteDatabase(appSchema.databaseName)
         openDatabase(appSchema).close()
         val v2 = Schema(
@@ -379,5 +379,74 @@ class SchemaValidationTest {
         )
         assertEquals(listOf("users"), schema.storeNames)
         assertFalse("orders" in schema.storeNames)
+    }
+}
+
+class OpenFailureTest {
+
+    @Test
+    fun openingAtALowerVersionThanTheDatabaseHasIsRefusedWithItsOwnType() = runTest {
+        installIndexedDb()
+        val name = "kidx-downgrade-test"
+        deleteDatabase(name)
+
+        val v2 = Schema(
+            name,
+            listOf(
+                Migration(1, listOf(SchemaStep.CreateStore(Users))),
+                Migration(2, listOf(SchemaStep.CreateStore(Orders))),
+            ),
+        )
+        openDatabase(v2).close()
+
+        val v1 = Schema(name, listOf(Migration(1, listOf(SchemaStep.CreateStore(Users)))))
+        val failure = assertFailsWith<DatabaseTooNewException> { openDatabase(v1) }
+        assertEquals(1, failure.declaredVersion)
+        assertEquals("VersionError", failure.errorName)
+        assertTrue("reload" in failure.message!!, failure.message!!)
+    }
+}
+
+class NestedTransactionTest {
+
+    private val schema = Schema(
+        "kidx-nesting-test",
+        listOf(Migration(1, listOf(SchemaStep.CreateStore(Users), SchemaStep.CreateStore(Orders)))),
+    )
+
+    private fun dbTest(block: suspend (Database) -> Unit) = runTest {
+        installIndexedDb()
+        deleteDatabase(schema.databaseName)
+        val db = openDatabase(schema)
+        try {
+            block(db)
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun openingATransactionInsideAnotherFailsInsteadOfHanging() = dbTest { db ->
+        val failure = assertFailsWith<KidxException> {
+            db.write(Users) { db.write(Users) { } }
+        }
+        assertTrue("deadlock" in failure.message!!, failure.message!!)
+        assertTrue("users" in failure.message!!, failure.message!!)
+    }
+
+    @Test
+    fun aReadInsideAWriteIsRefusedTooEvenOverAnotherStore() = dbTest { db ->
+        // Non-overlapping store sets would not deadlock today, but the transaction still auto-commits
+        // while the outer scope is suspended — so the rule is the same one, not a special case.
+        assertFailsWith<KidxException> {
+            db.write(Users) { db.read(Orders) { Orders.count() } }
+        }
+    }
+
+    @Test
+    fun sequentialTransactionsAreFine() = dbTest { db ->
+        db.write(Users) { }
+        db.read(Users) { Users.count() }
+        assertEquals(0L, db.read(Users) { Users.count() })
     }
 }
