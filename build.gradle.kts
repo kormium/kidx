@@ -61,8 +61,13 @@ kotlin {
         webMain {
             // Vendored JuulLabs/indexeddb sources, kept in the upstream module layout so that a
             // `diff -r` against a fresh checkout stays readable. See src/webMain/vendor/VENDOR.md.
-            kotlin.srcDir("src/webMain/vendor/core")
-            kotlin.srcDir("src/webMain/vendor/external")
+            //
+            // One source root, not one per upstream module: a source root's *relative* paths are what
+            // the sources jar is keyed by, so registering `vendor/core` separately put its
+            // `Database.kt` at the root — colliding with this project's own `Database.kt` and
+            // publishing one of them twice. Rooted here, they are `core/Database.kt` and
+            // `kotlin/Database.kt`.
+            kotlin.srcDir("src/webMain/vendor")
 
             dependencies {
                 api(libs.coroutines.core)
