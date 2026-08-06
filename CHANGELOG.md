@@ -5,13 +5,13 @@ may break API — and two changes are already known to be breaking when they lan
 *before* `1.0`: type-level index arity, and whatever finally enforces the suspend discipline (see
 SPEC.md's Roadmap and open questions).
 
-## Unreleased
+## 0.1.0
 
-Not published. Cutting `0.1.0` is a one-line version change plus Central credentials, and it is a
-deliberate wait rather than an oversight: index arity is a known breaking change that should land first,
-so publishing now would be a promise to break the API immediately.
+The first version: everything below is new.
 
-The first version. Nothing is published yet, so everything here is "added".
+Two breaking changes are already known to be wanted before `1.0` — type-level index arity, and whatever
+finally enforces the suspend discipline (SPEC.md's Roadmap and open questions). `0.x` is where they
+belong; that is what the leading zero is for.
 
 ### The v1 surface
 

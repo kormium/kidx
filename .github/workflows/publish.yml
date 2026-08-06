@@ -1,0 +1,53 @@
+name: publish
+
+# Releases are cut by pushing a tag. The tag is the source of truth for the version, so a release is
+# one authorized action rather than a version bump that might drift from what was tested.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (without the leading v)'
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Resolve the version from the tag
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "value=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A release must pass exactly what `check` passes — including the browser run, which is the only
+      # evidence about a real engine.
+      - name: Check
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+        run: >
+          ./gradlew apiCheck jsNodeTest jsBrowserTest wasmJsBrowserTest
+          -PenableBrowserTests=true -Pversion=${{ steps.version.outputs.value }}
+
+      - name: Publish to Maven Central
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: ./gradlew publishToMavenCentral -Pversion=${{ steps.version.outputs.value }}
