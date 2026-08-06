@@ -49,15 +49,21 @@ friendly-looking `where{}`.
 it is — the compiler refuses rather than the library silently working around it. Where it cannot, it
 fails loudly at the call site. Nothing is quietly substituted on the way to storage.
 
-**3. v1 emulates nothing.** Every operation in the v1 surface is one engine call (or a cursor, which
-is the engine's other read primitive). Anything that would require kidx to *simulate* a capability
-IndexedDB does not have — patch updates, insert-or-ignore, change notification, a migration journal —
-is deferred to the Roadmap, not shipped early. The base stays small and honest; it grows later, when
-each addition can be judged on its own merits with real code to look at.
+**3. Nothing pretends to be an engine capability.** Every operation on the data-access surface — read,
+write, query, migrate — is one engine call, or a cursor, which is the engine's other read primitive.
+kidx will not offer an operation that *looks* like one engine call and is secretly several: that is how
+a cost becomes invisible. `update(patch)` looks like one write and is a read plus a write;
+`insertOrIgnore` looks like one operation and cannot work at all (decision 6). Both are out, and the
+Roadmap says why.
 
-Principle 3 is the newest and the most consequential: several things designed in earlier rounds of
-this conversation were cut by it. The Roadmap records each one with what it costs, so nothing is
-lost — only postponed.
+What this principle does **not** forbid is a layer that is openly a kidx layer. Change notification
+(decision 15) is entirely kidx's own machinery — IndexedDB has no change events whatsoever — but it
+does not misrepresent anything, because nobody mistakes it for a database feature. It is named as a
+layer, its costs are documented, and it sits above the engine rather than inside the illusion of it.
+That distinction, not "emulation" as a word, is the line.
+
+This principle is the newest and cut several things designed in earlier rounds of this conversation.
+The Roadmap records each one with what it costs, so nothing is lost — only postponed.
 
 ## Architecture at a glance
 
@@ -68,6 +74,7 @@ lost — only postponed.
 │  src/webMain/kotlin — the DSL                                        │
 │    Row, Field/FieldType, Store, Index, Schema/Migration, Query,      │
 │    ReadScope/WriteScope                                              │
+│    WriteListeners, NotificationTransport, observe  (decision 15)     │
 │                                                                      │
 │  src/webMain/vendor — vendored JuulLabs/indexeddb (core + external)  │
 │    transaction lifetime discipline; see VENDOR.md                     │
@@ -82,10 +89,17 @@ justification gone and exactly one engine to hide, a second module would be stru
 and once there is only one module, naming it `-core` promises a sibling that does not exist. So the
 root project is the library, published as `io.github.kidx:kidx`.
 
-The first thing that would genuinely be a second module is `kidx-observe` (Roadmap), because it is
-optional for consumers. When it lands, this project's sources move into a subproject with
-`artifactId = "kidx"` pinned so the coordinate does not change — a mechanical move, and a cheaper
-price than carrying an empty multi-module scaffold until then.
+Change notification is **built in**, not a `kidx-observe` module. Kormium splits its observe module off
+for one reason — keeping coroutines and `Flow` out of `kormium-core`; the seam itself (`WriteListener`,
+`WriteListeners`, `NotificationTransport`) lives in core there too. That reason does not exist here:
+every operation is `suspend` and `Flow` is already in the public API through `stream()`, so there is
+nothing to keep out. And the seam has to be inside regardless, because only `WriteScope` can know which
+stores a transaction wrote — an "optional" module would have forced a public hook into the library
+anyway. See decision 15.
+
+So there is currently nothing that wants to be a second module. If something ever does, this project's
+sources move into a subproject with `artifactId = "kidx"` pinned so the coordinate does not change — a
+mechanical move, and a cheaper price than carrying an empty multi-module scaffold until then.
 
 The vendored code lives in its own source directory rather than its own module, in the upstream module
 layout (`vendor/core`, `vendor/external`), so re-checking it against a fresh clone is a `diff -r`. It
@@ -93,7 +107,9 @@ keeps its `com.juul.indexeddb` package names — which makes both the diffing an
 obvious in every file.
 
 Full-text search is not part of kidx: it is an in-memory concern, solved independently by
-[kromus](../kromus)'s `TextIndex` (BM25).
+[kromus](../kromus)'s `TextIndex` (BM25). The join between them is `Store.observe()` (decision 15),
+which is the `Flow` an incremental index-sync consumes — the same role `Table.observe(db){}` plays for
+`kromus-sync` in the SQL world.
 
 ## Decisions made, and why (read this before changing any of it)
 
@@ -581,6 +597,68 @@ that, but it also does not need a history to work, which is why it goes first.
   already, and is in v1 because both "reset all data" and every test suite need it. Open connections
   block a delete exactly as they block an upgrade, and it fails the same way.
 
+### 15. Change notification — the one layer above the engine, and it is built in
+
+IndexedDB has **no change events**. None: not per store, not per record, not per database. Every
+reactive query in every IndexedDB library is that library's own bookkeeping. kidx does it too, because
+"the data changed, redraw" is the central use of a client-side database and leaving it out would push
+every consumer into writing the same bookkeeping worse. Principle 3 permits this precisely because it
+does not pretend otherwise: this is visibly a kidx service, not a database feature.
+
+It is **built into kidx**, not a separate module. Kormium's split exists to keep coroutines out of
+`kormium-core` — its seam (`WriteListener`, `WriteListeners`, `NotificationTransport`) lives in core,
+and only the `Flow` layer is separate. Here `Flow` is already public API (`stream()`) and everything is
+`suspend`, so there is nothing to keep out; and only `WriteScope` can know which stores a transaction
+wrote, so the seam would have had to be public in the library either way.
+
+The design is Kormium's, ported shape-for-shape:
+
+- **`WriteScope` collects the names of the stores it wrote.** Over-collection is safe — it causes a
+  spurious refresh, never a missed one.
+- **They are fired after the transaction completes**, on the `complete` event, never before: a listener
+  that ran pre-commit could read state that is about to vanish. The vendored `writeTransaction` already
+  awaits completion after `commit()`, so the hook goes exactly there. A transaction that aborts fires
+  nothing.
+- **`WriteListeners`** is the registry — a `fun interface` plus `add()` returning a `Registration`.
+  This is the non-reactive seam, useful for cache invalidation or metrics, not only for `Flow`.
+- **`Store.observe(db) { }` → `Flow<List<R>>`** emits the query's result now, then re-runs and emits
+  again after every commit touching that store. Emissions are **conflated**: a burst of writes collapses
+  into one re-fetch rather than one per commit. There is also the generic
+  `db.observe(stores) { … }` for a fetch spanning several stores, which is the building block the typed
+  overload uses.
+- **The re-fetch runs in its own `db.read`**, not in the writer's transaction — it must, since the write
+  transaction is over by then. So an observed value is a fresh consistent snapshot, taken after the
+  commit.
+
+Two costs, documented rather than hidden:
+
+- **Invalidation is per store, not per key.** Writing one row re-runs every query observing that store.
+  Kormium has the same granularity (its dirty set is table names) and the same reason: knowing which
+  queries a given key affects would mean modelling the queries, which is a query planner.
+- **The re-fetch and the row hydration happen wherever the flow is collected** — typically the main
+  thread. Kormium's equivalent cannot block a UI; this one can. An observed query over a large store is
+  a real cost, and `stream()` plus manual invalidation is the escape hatch.
+
+**Across contexts** — tabs, workers, an extension's service worker — the same signals travel over
+`NotificationTransport`: `suspend publish(stores: Set<String>)` plus `subscribe(): Flow<Set<String>>`,
+connected by `db.connectNotifications(transport)`. Inbound remote signals are delivered into the local
+registry exactly as if a local commit had touched those stores, and are deliberately **not**
+re-published, or two contexts would echo forever. Where Kormium ships a Postgres `LISTEN/NOTIFY`
+transport, kidx ships **`BroadcastChannelTransport`**: `BroadcastChannel` is available in windows,
+workers and extension service workers, which is exactly the set of places that share an IndexedDB
+database. The wire format is Kormium's — the store names, comma-joined.
+
+Three things a transport implementation has to get right, all of them consequences of kidx's own
+decisions:
+
+- A receiving context re-runs *its own* queries against *its own* connection; the signal carries names,
+  never data.
+- A signal may name a store the receiver's schema does not have, because the other context is running
+  a different code version. Unknown names are ignored, not an error.
+- A `Flow` observing a database that has been closed — `close()`, or the default `versionchange`
+  handling of decision 14 — terminates with the same typed error the operations would give, rather than
+  going quiet. A silently dead reactive query is worse than a failing one.
+
 ## The DSL (design sketch — not compiled, not tested)
 
 ```kotlin
@@ -721,8 +799,46 @@ suspend fun deleteDatabase(name: String)
 class Database internal constructor(/* … */) {
     suspend fun <T> read(vararg stores: Store<*>, block: suspend ReadScope.() -> T): T
     suspend fun <T> write(vararg stores: Store<*>, block: suspend WriteScope.() -> T): T
+    val writeListeners: WriteListeners
     fun close()
 }
+
+// ---- change notification (decision 15) ----
+
+/** Called after a write transaction commits, with the names of the stores it wrote. Never on abort. */
+fun interface WriteListener {
+    fun onCommit(stores: Set<String>)
+}
+
+fun interface Registration {
+    fun remove()
+}
+
+class WriteListeners internal constructor(/* … */) {
+    fun add(listener: WriteListener): Registration
+    val isActive: Boolean            // lets a write scope skip dirty-set bookkeeping entirely
+}
+
+/** Re-runs [fetch] after every commit touching one of [stores]. Emits once immediately; conflated. */
+fun <T> Database.observe(stores: Set<String>, fetch: suspend ReadScope.() -> T): Flow<T>
+
+/** The typed overload: `Users.observe(db) { … }`, or with no block, every row. */
+fun <R : Row> Store<R>.observe(db: Database): Flow<List<R>>
+fun <R : Row> Store<R>.observe(db: Database, index: Index<R>, block: QueryBuilder<R>.() -> Unit): Flow<List<R>>
+
+/**
+ * Carries "these stores were written" between execution contexts. Inbound signals are delivered into
+ * the local [WriteListeners]; they are never re-published, or contexts would echo forever.
+ */
+interface NotificationTransport {
+    suspend fun publish(stores: Set<String>)
+    fun subscribe(): Flow<Set<String>>
+}
+
+fun Database.connectNotifications(transport: NotificationTransport): Registration
+
+/** The shipped transport: windows, workers and extension service workers all speak BroadcastChannel. */
+class BroadcastChannelTransport(channelName: String) : NotificationTransport
 
 // ---- queries ----
 
@@ -865,6 +981,20 @@ db.write(Users, Orders) {
 }
 ```
 
+Observation (decision 15) — the write above is what makes these re-emit:
+
+```kotlin
+// emits now, then after every commit touching `orders`; bursts are conflated
+Orders.observe(db, Orders.byUser) { Orders.userId eq userId }
+    .collect { orders -> render(orders) }
+
+// …including commits from another tab, worker or extension service worker
+db.connectNotifications(BroadcastChannelTransport("app-db"))
+
+// the non-reactive seam, for a cache or metrics rather than a Flow
+val registration = db.writeListeners.add { stores -> cache.invalidate(stores) }
+```
+
 ### Recipes
 
 **Compare-and-set.** There is no optimistic-locking primitive: `put` writes whole records and returns
@@ -987,17 +1117,11 @@ from zero:
 Everything cut by principle 3, plus what was deferred for its own reasons. Each entry says what it
 costs, because the reason for cutting it is not that it is worthless.
 
-- **Change notification and `Flow` queries.** The largest thing not in v1, and pure emulation:
-  IndexedDB has no change events at all, so kidx would have to maintain them. Kormium's design ports
-  directly — `Scope` collects the stores written, fires them at a `WriteListeners` registry after the
-  transaction's `complete` event, and an observe module turns that into a conflated `channelFlow`
-  (`Store.observe(db) { }` → `Flow<List<R>>`). Its cross-context half is Kormium's
-  `NotificationTransport` (`suspend publish(stores)` + `subscribe(): Flow<Set<String>>` with
-  `connectNotifications` preventing echo), whose browser implementation is a `BroadcastChannel`
-  transport carrying signals between tabs, workers and extension service workers. Two costs to weigh
-  when it lands: invalidation is per-store, not per-key, so writing one row re-runs the whole query;
-  and the re-fetch plus re-hydration happens on the main thread, where Kormium's equivalent does not
-  block a UI. Purely additive — it can arrive without breaking any v1 signature.
+- **Finer invalidation for `observe`.** Notification itself is in v1 (decision 15), but its granularity
+  is a whole store: writing one row re-runs every query watching it. Narrowing that means knowing which
+  keys a query covers and comparing them against the keys a transaction wrote — which is cheap for the
+  common shape (a range over one index) and impossible in general, so it would be an optimization with a
+  fallback, not a new guarantee. Worth doing only once a real UI shows it matters.
 - **Patch updates.** `update(patch)` as get + merge-the-present-fields + put in one transaction,
   restoring Kormium's "an update writes only the fields you assigned". Correct under transaction
   isolation, and it needs `unset()` back. Watch the `Blob` case: a read-modify-write rewrites the
@@ -1016,7 +1140,10 @@ costs, because the reason for cutting it is not that it is worthless.
   The catch that makes this urgent rather than optional: added later, it cannot know the checksum of
   anything applied before it existed, so every pre-existing database stays unverifiable forever. It is
   cheap only on day one. Structural verification (decision 13) covers the more common failure and
-  needs no history, which is why it went first and this did not.
+  needs no history, which is why it went first and this did not. Note honestly that principle 3 no
+  longer argues against this one: like notification, a journal is openly a kidx layer and pretends to be
+  nothing. What keeps it out of v1 is only sequencing — and the day-one argument says that sequencing
+  has a real price, so this is the Roadmap entry most worth revisiting soonest.
 - **Type-level index arity.** Today `Index<R>` carries no field types, so "leading fields pinned with
   `eq`, at most one range and only last" is validated when the query is built: immediate and
   deterministic (first call, first test), but runtime. The typed alternative is `Index1<R,A>` /
@@ -1059,8 +1186,8 @@ that upstream configures *no* `nodejs()` target, which bears on the test questio
    skeleton: the vendored build declares only `browser()`, so a Node-based test target is something
    kidx would have to add rather than inherit.
 3. **Publishing.** The coordinate is `io.github.kidx:kidx`; a `kidx-bom` (as Kormium has) only becomes
-   meaningful once there is more than one artifact, i.e. when `kidx-observe` lands. The publish plugin
-   is not wired up yet.
+   meaningful if there is ever more than one artifact, and with notification built in there is currently
+   nothing that wants to be one. The publish plugin is not wired up yet.
 4. **Error hierarchy.** Kormium's typed exceptions (`ResultMappingException`,
    `ConcurrencyConflictException`, `MigrationChecksumException`) have IndexedDB counterparts worth
    naming: `ConstraintError`, `QuotaExceededError`, `AbortError`, blocked-by-another-context,
@@ -1080,7 +1207,8 @@ Cheap now, expensive to retrofit — and they are how the author's other librari
 - An `AGENTS.md` in the copy-ready style of Kormium's: mental model first, then the canonical form
   for each task, a "which form for what" table, recipes, and a gotchas list. For kidx the gotchas
   list should include the engine-call table from decision 7 (which call each read becomes is the
-  thing users most need and least can guess), the key-ordering rules from decision 11, and the
-  all-or-nothing abort semantics from decision 6. Plus `docs/` with ADRs, `CHANGELOG.md`, `llms.txt`.
+  thing users most need and least can guess), the key-ordering rules from decision 11, the
+  all-or-nothing abort semantics from decision 6, and the per-store invalidation granularity from
+  decision 15. Plus `docs/` with ADRs, `CHANGELOG.md`, `llms.txt`.
 - The house comment style: every non-obvious decision carries its "why" inline, next to the code that
   depends on it — including the measurements behind performance choices.

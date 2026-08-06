@@ -7,9 +7,9 @@ pluginManagement {
 
 // A single-project build: kidx is one library, so the root *is* the library. There is no
 // `kidx-core`, because there is nothing for it to be the core of — one module, one `webMain`
-// source set shared by the js and wasmJs targets, one engine.
+// source set shared by the js and wasmJs targets, one engine, and change notification built in
+// rather than split off (SPEC.md decision 15).
 //
-// `kidx-observe` (see SPEC.md, Roadmap) is the first thing that would genuinely be a second module,
-// because it is optional for consumers. Adding it means moving this project's sources into a
-// subproject and pinning `artifactId = "kidx"` so the published coordinate does not change.
+// If something ever does want to be a second module, this project's sources move into a subproject
+// with `artifactId = "kidx"` pinned so the published coordinate does not change.
 rootProject.name = "kidx"
