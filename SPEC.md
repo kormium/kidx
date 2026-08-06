@@ -1,15 +1,19 @@
 # kidx — spec
 
-Status: **the build skeleton exists and the vendored engine compiles for js and wasmJs; none of kidx's
-own code is written.** This document is the full record of a design conversation; it exists so a next
+Status: **v1 is implemented and tested.** This document is the full record of a design conversation; it exists so a next
 agent (human or Claude) can pick up the work without re-deriving any of it. Read it end to end before
 writing code — several approaches below were considered and explicitly rejected, and re-proposing them
 wastes a round trip.
 
-What exists on disk: a single-project Gradle build (the root *is* the library), the wrapper, the
-binary-compatibility validator, and the vendored JuulLabs sources under `src/webMain/vendor/` with
-their provenance and the changes they still need recorded in `VENDOR.md`. Reading that code answered
-three open questions and contradicted one decision; both are folded into the text below.
+What exists on disk: a single-project Gradle build (the root *is* the library) with the whole v1
+surface in `src/webMain/kotlin`, the vendored JuulLabs sources under `src/webMain/vendor` (provenance
+and every kidx change in `VENDOR.md`), and 95 tests — the ones needing no database in `src/webTest`,
+running on js and wasmJs, the engine-level ones in `src/jsTest` on `fake-indexeddb` under Node.
+
+Building it corrected this document in five places, each marked **implementation note** below. Two are
+worth knowing before reading anything else: `@RestrictsSuspension` did not survive contact with the
+compiler (decision 5), and `Field.Bytes()` did not survive contact with the interop cost
+(decision 10).
 
 ## What this is
 
@@ -288,9 +292,21 @@ one legitimate suspending consumer is inside the allowed set.
 in a doc comment on `openDatabase` and on `Transaction.openCursor`, and nothing enforces it — the
 cursor implementation only detects the symptom after the fact, closing the flow with
 `IllegalStateException("Send failed. Did you suspend illegally?")` when a `trySend` fails because the
-collector suspended. So this is a place where kidx can be genuinely stricter than upstream rather than
-merely as strict. Upstream's cursor contract also requires the collector not to suspend *at all* under
-`autoContinue = true`, which is why kidx's scope-scoped `collect` takes a non-suspending action.
+collector suspended. Upstream's cursor contract also requires the collector not to suspend *at all*
+under `autoContinue = true`, which is why kidx's scope-scoped `collect` takes a non-suspending action.
+
+> **Implementation note: the annotation is not there.** It was applied to `ReadScope`/`WriteScope` and
+> the compiler rejected the library's own code: *"restricted suspending functions can invoke member or
+> extension suspending functions only on their restricted coroutine scope."* kidx invokes the user's
+> block from inside the driver's own transaction lambda — `driver.writeTransaction { WriteScope(this,
+> names).block() }` — and that call is exactly what the restriction forbids. So the discipline is
+> currently what it is upstream: a documented rule, plus the driver detecting the symptom, plus kidx's
+> own `collect` keeping the one legitimate suspending consumer in reach.
+>
+> Two ways out, neither tried: invoke the block outside the driver lambda (which means reimplementing
+> the transaction plumbing kidx vendored the driver *for* — likely a bad trade), or a coroutine-context
+> marker checked at runtime, which catches a nested `db.write` but not a stray `delay`. Until one is
+> chosen, this is the largest gap between what the design promises and what it enforces.
 
 ### 6. Failure: the whole transaction, no savepoints, no nesting
 
@@ -445,13 +461,19 @@ an error when a record's key would be invalid, it **silently omits that record f
 | `Int` | number | yes |
 | `Double` | number | yes |
 | `Instant` | native `Date` | yes |
-| `ByteArray` | `ArrayBuffer` | yes |
 | `Boolean` | `true`/`false` | **no** |
 | `Blob` | native `Blob` | **no** |
 
 That set is deliberately shorter than Kormium's thirteen. `Long`, `Short`, `Float`, `LocalDate`,
 `LocalDateTime`, `Decimal` and JSON are not built in: each would need a representation decision that
 is the application's to make, and `convert` is the supported way to make it.
+
+> **Implementation note: `Bytes` is not built in either.** It was specified here and then dropped while
+> being written. A `ByteArray` has to become a JS typed array, and doing that from the one `webMain`
+> source set means either a per-target `expect`/`actual` pair or a per-byte `js(...)` call in a loop —
+> and a JS call per byte is exactly the overhead this library exists not to have. `Blob` covers binary
+> data natively and better (the engine keeps it out of memory until asked), so binary keys are the only
+> thing genuinely lost. In the Roadmap.
 
 - **`Long` is not in the built-in set.** In Kotlin/JS it is not a JS number but an object with
   low/high halves; structured-cloning it would store garbage. The alternatives were a number (silent
@@ -555,6 +577,11 @@ shape natively — `objectStoreNames`, a store's `keyPath` and `autoIncrement`, 
 message naming the difference and the migration that should have produced it. One pass over metadata,
 no data read, no bookkeeping of its own.
 
+Verification runs in both directions: something declared and missing from the database, and something
+in the database that the schema does not declare. The second is drift too, and in the same direction —
+IndexedDB refuses to open a database at a lower version than it has, so older code cannot be looking at
+a newer database; an undeclared store means the migration list and the disk have diverged.
+
 This is worth having in v1 for a reason beyond tidiness: it catches the most common real divergence —
 a migration that forgot an `AddIndex`, or a store created with a different `keyPath` — on any existing
 database, without remembering anything. The checksummed journal (Roadmap) answers a different
@@ -579,15 +606,16 @@ that, but it also does not need a history to work, which is why it goes first.
   changing the one part of that code kidx vendored it for. If waiting is ever wanted, it is a
   `VENDOR.md` change, not a kidx-side one.)
 - **`onVersionChange`** is the mirror case: *we* hold an older version and another context wants to
-  upgrade. Default behaviour is to close our connection, so the other context is never blocked
-  indefinitely, after which our operations fail with an error saying the schema was upgraded elsewhere
-  and the page should reload. An application can install its own handler and take over — save a
-  draft, show a banner, close when ready — and the KDoc must state plainly that a handler which never
-  closes leaves the other context blocked forever. That is then a decision, deliberately made. This
-  is a hair away from Kormium's stance of shipping the seam and leaving policy to the caller (it ships
-  `ConcurrencyConflictException`, not a retry loop); the difference is that the do-nothing default
-  here hangs *another* execution context, so the safe behaviour is the default and the seam is the
-  opt-in.
+  upgrade. Our connection closes, so the other context is never blocked indefinitely, after which our
+  operations fail with an error saying the schema was upgraded elsewhere and the page should reload.
+
+  > **Implementation note: this is a notification, not a veto.** The vendored `Database` registers its
+  > own `versionchange` listener in its constructor and closes unconditionally, so a kidx-side handler
+  > runs *alongside* that close rather than in place of it: an application can be told, drop caches and
+  > show a banner, but it cannot hold the connection open to finish saving a draft. Taking over would
+  > mean changing that listener — a `VENDOR.md` change to the lifecycle code, which is close to the
+  > part kidx deliberately does not touch. The safe behaviour being the default is the right trade
+  > anyway; what is missing is only the opt-out.
 - **`close()`** is idempotent; afterwards every operation fails with a clear error rather than
   reopening implicitly.
 - **`openDatabase` is not a singleton.** Two calls for the same schema give two independent
@@ -1104,8 +1132,24 @@ from zero:
   transaction lifetime, abort semantics, key ordering — can be verified at all.
 - **`fake-indexeddb` in a Node test source set** buys fast unit tests without a browser, at the price
   of testing against a JS reimplementation with its own bugs. Useful for kidx's own logic (query
-  building, hydration, migration replay), not for anything in the previous bullet. Which of the two is
-  the default, and whether both exist, is open question 4.
+  building, hydration, migration replay), not for anything in the previous bullet.
+
+**What was chosen.** Both, split by what they can actually cover:
+
+- `src/webTest` — everything that needs no database at all (rows, field types, the record codec, query
+  building). Runs on js and wasmJs, so both targets' interop is exercised.
+- `src/jsTest` — everything that needs an engine, on `fake-indexeddb` under Node. js-only, because the
+  npm dependency and `require` are; the wasmJs side of the same behaviour needs a browser.
+- Browser tests are declared but not written. Anything genuinely engine-specific — real abort
+  behaviour, real key ordering, quota — is only trustworthy there, and `fake-indexeddb` passing is not
+  evidence about a browser.
+
+Two things worth knowing before writing more tests. An async `@BeforeTest` **does not work**: the
+kotlin-test JS runner awaits the promise a `@Test` returns but not one from a fixture method, so a
+`runTest` fixture silently does not run and every test sees an uninitialized field. Open the database
+inside the test instead. And a `yield()` is not enough to let an `observe` flow reach its first
+emission — the initial read goes through several suspensions in the driver — so await each emission
+through a channel rather than assuming the scheduler got there.
 - **`describe(index) { … }`** needs no database at all: it returns the key range, direction and limit
   a query builds, which is exactly what the prefix-rule validation should be tested against. It is
   the analogue of Kormium's `renderSql { }`, and for the same reason — a way to assert what would run
@@ -1165,38 +1209,45 @@ costs, because the reason for cutting it is not that it is worthless.
   clone stores nested objects natively, so the useful form here may be "store the object, not a
   string" — which changes what `read`/`toStored` do and whether kotlinx-serialization is involved at
   all. Not designed.
+- **`Field.Bytes()`.** A `ByteArray` field, which decision 10 originally specified and the
+  implementation dropped: converting to and from a JS typed array needs a bulk path, and the only
+  portable one from a single `webMain` source set is a per-byte `js(...)` call. The fix is either an
+  `expect`/`actual` pair (the first in the project — currently there are none) or a copy through
+  `Int8Array`'s buffer done once per value rather than once per byte. Until then binary data goes in a
+  `Blob`, and a binary *key* is not expressible.
 - **Storage quota and eviction.** Native `Blob` storage makes quota real:
   `navigator.storage.persist()`, usage estimates, and a typed error for `QuotaExceededError`.
 
 ## Open questions for whoever continues this
 
-Three earlier questions are now answered by the skeleton and by reading the vendored code, and are
-folded into the decisions above: **module layout** (one module — see "Architecture"),
-**Kotlin/Wasm** (`js { browser() }` and `wasmJs { browser() }` both compile the vendored sources; note
-that upstream configures *no* `nodejs()` target, which bears on the test question below), and
-**`@RestrictsSuspension`** (upstream does not use it — decision 5).
+Five earlier questions are answered and folded into the text above: **module layout** (one project — see
+"Architecture"), **Kotlin/Wasm** (both targets compile and the no-database tests run on both),
+**`@RestrictsSuspension`** (it does not work here — the implementation note under decision 5),
+**test strategy** (both runners, split by what each can cover — see "Testing"), and the **shape of the
+DSL**, which is no longer a sketch: everything under "The DSL" compiles and is exercised.
 
-1. **Does the vendored API stay public?** The vendored sources are `public` and, in one module under
+1. **How is the suspend discipline enforced?** The one real gap between what this document promises and
+   what the code enforces. See decision 5's implementation note: either the transaction plumbing gets
+   restructured so the user's block is not invoked from inside the driver's lambda, or a
+   coroutine-context marker is checked at runtime — which catches a nested `db.write` but not a stray
+   `delay`. Left open deliberately; the wrong answer is expensive.
+2. **Does the vendored API stay public?** The vendored sources are `public` and, in one module under
    `explicitApi()`, they land in kidx's own ABI dump — so `com.juul.indexeddb` becomes part of kidx's
    published surface, which undercuts the "zero third-party surface for consumers" half of decision 4.
-   The fix is a mechanical `public` → `internal` pass over `vendor/`, which stays re-appliable after
-   each upstream port precisely because it is mechanical. Not done yet: it is a large diff against
-   upstream and worth deciding deliberately.
-2. **Test strategy** — browser-only, `fake-indexeddb`-first, or both (see "Testing"). Sharpened by the
-   skeleton: the vendored build declares only `browser()`, so a Node-based test target is something
-   kidx would have to add rather than inherit.
-3. **Publishing.** The coordinate is `io.github.kidx:kidx`; a `kidx-bom` (as Kormium has) only becomes
+   The fix is a mechanical `public` → `internal` pass over `vendor/`, which stays re-appliable after each
+   upstream port precisely because it is mechanical.
+3. **Browser tests.** Declared and unwritten. Everything genuinely engine-specific — real abort
+   behaviour, real key ordering, quota — is only trustworthy there, and `fake-indexeddb` passing is not
+   evidence about a browser.
+4. **Publishing.** The coordinate is `io.github.kidx:kidx`; a `kidx-bom` (as Kormium has) only becomes
    meaningful if there is ever more than one artifact, and with notification built in there is currently
-   nothing that wants to be one. The publish plugin is not wired up yet.
-4. **Error hierarchy.** Kormium's typed exceptions (`ResultMappingException`,
-   `ConcurrencyConflictException`, `MigrationChecksumException`) have IndexedDB counterparts worth
-   naming: `ConstraintError`, `QuotaExceededError`, `AbortError`, blocked-by-another-context,
-   IndexedDB-unavailable (upstream raises a bare `IllegalStateException` for it, which kidx should
-   wrap), plus kidx's own hydrate-time (absent / null / wrong type — decision 9), query-build-time and
-   schema-verification failures. The message quality Kormium achieves (name the store, the field, the
-   expected type, and what to do) is a feature, not a nicety — budget for it.
-5. **None of kidx's own code is written.** Everything under "The DSL" is a sketch for shape and
-   ergonomics, not verified to compile. What compiles today is the vendored engine and nothing else.
+   nothing that wants to be one. The publish plugin is not wired up.
+5. **Error hierarchy.** What exists: `KidxException` with `SchemaException`, `SchemaMismatchException`,
+   `RowMappingException`, `QueryException`, `FieldTypeException`, `DatabaseBlockedException`,
+   `DatabaseClosedException`, `IndexedDbUnavailableException`. What does not: the engine's own failures
+   still surface as the driver's `ErrorEventException` — a `ConstraintError` (duplicate key, unique-index
+   violation) and a `QuotaExceededError` are worth telling apart by type, since an application handles
+   them differently.
 
 ## Conventions to adopt from day one
 
