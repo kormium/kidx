@@ -27,23 +27,24 @@ diff -r /tmp/idb/external/src/webMain/kotlin src/webMain/vendor/external
 
 ## Modifications
 
-**None yet.** The sources are byte-identical to the upstream revision above.
-
-Every future change goes in the table below, with the reason, so that porting an upstream update is a
-matter of re-applying a known list rather than re-deriving it. Do not modify the transaction-scoping
-discipline (`Transaction`/`WriteTransaction` receivers, `Dispatchers.Unconfined`, the
-`awaitTransaction` serialization) — that is the part kidx vendored this code *for*.
+Every change is in the table below, with its reason, so that porting an upstream update is a matter of
+re-applying a known list rather than re-deriving it. Each one is marked with a `kidx modification`
+comment at the site. Do not modify the transaction-scoping discipline (`Transaction`/`WriteTransaction`
+receivers, `Dispatchers.Unconfined`, the `awaitTransaction` serialization) — that is the part kidx
+vendored this code *for*.
 
 | File | Change | Why |
 |---|---|---|
-| — | — | — |
+| `external/IDBFactory.kt` | `indexedDB` reads `globalThis` instead of `self`, and is a getter instead of an eagerly-initialized `val` | `self` does not exist outside a browser or worker, so merely loading the module under a Node test runner threw a `ReferenceError`. Reading it lazily also lets a test install an IndexedDB implementation (`fake-indexeddb`) before first use rather than before module load. |
+| `core/KeyPath.kt` | added `toOptions(autoIncrement: Boolean)` | See needed-change 1 below: an in-line key path *and* a key generator. |
+| `core/Transaction.kt` | added `Database.createObjectStore(name, keyPath, autoIncrement)` | Same. IndexedDB allows the combination and kidx requires it; upstream exposes the two options as mutually exclusive overloads. |
 
-### Changes already known to be needed
+### Findings from reading this code against SPEC.md
 
-Findings from reading this code against SPEC.md. Each is a real gap between what kidx's design needs
-and what upstream exposes; none is applied yet.
+Item 1 is applied (see the table). The rest are open, and each is a real gap between what kidx's design
+needs and what upstream exposes.
 
-1. **`createObjectStore` cannot combine a key path with a key generator.**
+1. ~~**`createObjectStore` cannot combine a key path with a key generator.**~~ *(applied)*
    `Database.createObjectStore(name, keyPath)` and `Database.createObjectStore(name, autoIncrement)`
    are separate overloads, and `AutoIncrement.toOptions()` sets only `autoIncrement = true`. IndexedDB
    allows both together (an in-line key *and* a generator), and SPEC.md decisions 9 and 12 require

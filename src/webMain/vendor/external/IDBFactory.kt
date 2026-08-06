@@ -12,4 +12,13 @@ public external class IDBFactory : JsAny {
     public fun deleteDatabase(name: String): IDBOpenDBRequest
 }
 
-public val indexedDB: IDBFactory? = js("self.indexedDB || self.webkitIndexedDB")
+// kidx modification (see VENDOR.md): `globalThis` instead of `self`, and a getter instead of an
+// eagerly-initialized val. `self` does not exist outside a browser/worker, so the original threw a
+// ReferenceError merely by being loaded under a Node test runner; and reading it lazily lets a test
+// install an IndexedDB implementation before the first use rather than before module load.
+public val indexedDB: IDBFactory?
+    get() = currentIndexedDB()
+
+// A top-level function, because Kotlin/Wasm only allows `js(...)` as a whole top-level function body or
+// a property initializer — not in a getter.
+private fun currentIndexedDB(): IDBFactory? = js("globalThis.indexedDB || globalThis.webkitIndexedDB")

@@ -4,4 +4,10 @@ package com.juul.indexeddb.external
 public external interface IDBIndex : IDBQueryable {
     public val name: String
     public val objectStore: IDBObjectStore
+
+    // kidx modification (see VENDOR.md): the introspection properties the platform already has, needed
+    // to verify a declared schema against the database on open.
+    public val keyPath: IDBKeyPath
+    public val unique: Boolean
+    public val multiEntry: Boolean
 }

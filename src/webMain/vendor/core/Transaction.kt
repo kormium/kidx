@@ -345,6 +345,18 @@ public class VersionChangeTransaction internal constructor(
         return ObjectStore(ensureDatabase().createObjectStore(name, autoIncrement.toOptions()))
     }
 
+    // kidx modification (see VENDOR.md): in-line keys *with* a key-generator, so the generated key is
+    // written into the stored record. IndexedDB allows the combination; upstream had no overload for it.
+    /** Creates an object-store that uses in-line keys with a key-generator. */
+    public fun Database.createObjectStore(
+        name: String,
+        keyPath: KeyPath,
+        autoIncrement: AutoIncrement,
+    ): ObjectStore {
+        logger.log(Type.Database) { "Creating object store: $name" }
+        return ObjectStore(ensureDatabase().createObjectStore(name, keyPath.toOptions(autoIncrement = true)))
+    }
+
     public fun Database.deleteObjectStore(name: String) {
         logger.log(Type.Database) { "Deleting object store: $name" }
         ensureDatabase().deleteObjectStore(name)

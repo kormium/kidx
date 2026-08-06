@@ -103,7 +103,7 @@ public abstract class Store<R : Row>(
                         "value (expected ${field.type.description}).",
                 )
             }
-            recordSet(record, field.name, if (value == null) null else field.encodeUnchecked(value))
+            recordSet(record, field.name, if (value == null) null else field.encodeAny(value))
         }
         return record
     }
@@ -157,6 +157,9 @@ public abstract class Store<R : Row>(
     internal fun keyPath(): List<String> = primaryKey.map { it.name }
 }
 
+/** Encodes a value whose static type has been erased — the codec and the key builders both need it. */
 @Suppress("UNCHECKED_CAST")
-private fun Field<*, *, *>.encodeUnchecked(value: Any): JsAny =
-    (type as FieldType<Any>).encode(value)
+internal fun Field<*, *, *>.encodeAny(value: Any): JsAny = (type as FieldType<Any>).encode(value)
+
+@Suppress("UNCHECKED_CAST")
+internal fun FieldType<*>.decodeAny(stored: JsAny): Any = (this as FieldType<Any>).decode(stored)

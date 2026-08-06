@@ -55,5 +55,13 @@ kotlin {
             implementation(kotlin("test"))
             implementation(libs.coroutines.test)
         }
+
+        // Engine-level tests are js-only: they need a working IndexedDB, and outside a browser the
+        // only one available is `fake-indexeddb` under Node. The wasmJs side of the same behaviour can
+        // only be covered by browser tests. Everything that needs no database lives in `webTest` and
+        // runs on both targets.
+        jsTest.dependencies {
+            implementation(npm("fake-indexeddb", "^6.0.0"))
+        }
     }
 }

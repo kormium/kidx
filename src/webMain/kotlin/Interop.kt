@@ -51,4 +51,26 @@ internal fun jsDateMillis(value: JsAny): Double = js("value.getTime()")
 
 /** For diagnostics only: what was actually found, when a decode fails. */
 internal fun jsDescribe(value: JsAny?): String =
-    if (value == null) "null" else js("(value instanceof Date ? 'Date' : typeof value)")
+    js("value === null ? 'null' : value === undefined ? 'undefined' : value instanceof Date ? 'Date' : typeof value")
+
+/** `null`/`undefined` from the engine: a `get` that found nothing returns `undefined`. */
+internal fun jsIsNullish(value: JsAny?): Boolean = js("value === null || value === undefined")
+
+/** The upper-bound sentinel for a prefix scan: arrays sort above every other key type. */
+internal fun jsEmptyArray(): JsAny = js("[]")
+
+// ---- BroadcastChannel, for the cross-context transport (decision 15) ----
+
+internal fun broadcast(channelName: String, message: String) {
+    js("{ const c = new BroadcastChannel(channelName); c.postMessage(message); c.close(); }")
+}
+
+internal fun openBroadcast(channelName: String): JsAny = js("new BroadcastChannel(channelName)")
+
+internal fun closeBroadcast(channel: JsAny) {
+    js("channel.close()")
+}
+
+internal fun onBroadcast(channel: JsAny, handler: (String) -> Unit) {
+    js("channel.onmessage = (event) => handler(String(event.data))")
+}

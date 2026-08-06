@@ -135,7 +135,7 @@ public object InstantFieldType : KeyFieldType<Instant> {
  * build one — which is exactly why it is worth having, since the engine keeps a blob out of memory
  * until something asks for its contents (decision 10). Not a valid key.
  */
-public interface Blob : JsAny
+public external interface Blob : JsAny
 
 public object BlobFieldType : FieldType<Blob> {
     override fun encode(value: Blob): JsAny = value
