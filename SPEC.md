@@ -7,116 +7,180 @@ explicitly rejected, and re-proposing them wastes a round trip.
 
 ## What this is
 
-A typed, Kotlin/JS-native storage layer over IndexedDB, built for [stramus](../stramus) but designed
-as an independent sibling project (same relationship [kormium](../kormium) and [kromus](../kromus)
-have to it). Its declaration syntax deliberately imitates Kormium's `Table`/`Column`/`Entity` DSL —
-same author, same codebase, same taste — but it is **not** built on Kormium's SQL machinery. It is a
-new, from-scratch typed layer over a vetted low-level IndexedDB engine.
+A typed, Kotlin-native storage layer over IndexedDB: schema declaration, typed rows, indexed
+queries and migrations. An independent, publishable library (its own Maven coordinates, the same
+relationship [kormium](../kormium) and [kromus](../kromus) have to each other), not an internal
+module of any one application.
 
-## Why this exists (context for the "why", not just the "what")
+Its declaration syntax deliberately imitates Kormium's `Table`/`Column`/`Entity` DSL — same author,
+same taste, and in several places the same machinery (see decision 3) — but it is **not** built on
+Kormium's SQL execution. It is a new typed layer over a vetted low-level IndexedDB engine.
 
-stramus's client currently stores everything in SQLite compiled to WASM
-(`kormium-sqlite-js`), persisted inside IndexedDB by the WASM SQLite VFS. Two concrete, documented
-frictions motivate moving off WASM:
+Targets Kotlin/JS and Kotlin/Wasm (the vendored engine core supports both; see decision 4).
+Package: `io.github.kidx`.
 
-- **Chrome Web Store review friction.** `store/submission.md` and `store/README.md` in the stramus
-  repo already have to carry an explicit justification for the `wasm-unsafe-eval` CSP directive the
-  WASM SQLite module requires. Dropping WASM removes this from the review surface entirely.
-- **Bundle size.** WASM SQLite builds are on the order of 1-2MB; a plain JS/Kotlin-JS IndexedDB layer
-  is nowhere near that.
+## Why this exists
 
-The guiding principle for the whole design, stated by the project owner and applied throughout:
-**take the maximum IndexedDB actually offers, and not one gram more.** IndexedDB is a single-index
-range-scan engine with no query planner — it is not SQL, and pretending otherwise (by porting a
-general SQL-shaped query DSL on top of it) either produces a leaky abstraction or hides silent full
-table scans behind a friendly-looking `where{}`. Every decision below follows from taking that
-seriously.
+Two reasons to want a Kotlin-native IndexedDB layer instead of SQLite-compiled-to-WASM:
+
+- **No `wasm-unsafe-eval`.** A WASM SQLite module needs that CSP directive. Dropping WASM removes it
+  from the page's security posture entirely — which matters wherever the CSP is reviewed or locked
+  down (browser extensions, embedded contexts, strict-CSP sites).
+- **Bundle size.** WASM SQLite builds run 1-2MB; a plain Kotlin/JS IndexedDB layer is nowhere near
+  that.
+
+And one reason to want a *typed* layer rather than a JS library through interop: in a Kotlin codebase
+every call across an `external`/`dynamic` boundary is a permanent ongoing cost, not a one-time one.
+
+## The three principles, in priority order
+
+**1. Take the maximum IndexedDB actually offers, and not one gram more.** IndexedDB is a
+single-index range-scan engine with no query planner. It is not SQL, and pretending otherwise
+(porting a general SQL-shaped query DSL onto it) either leaks or hides full scans behind a
+friendly-looking `where{}`.
+
+**2. Explicit beats implicit.** Where a limitation of the engine can be expressed in the type system,
+it is — the compiler refuses rather than the library silently working around it. Where it cannot, it
+fails loudly at the call site. Nothing is quietly substituted on the way to storage.
+
+**3. v1 emulates nothing.** Every operation in the v1 surface is one engine call (or a cursor, which
+is the engine's other read primitive). Anything that would require kidx to *simulate* a capability
+IndexedDB does not have — patch updates, insert-or-ignore, change notification, a migration journal —
+is deferred to the Roadmap, not shipped early. The base stays small and honest; it grows later, when
+each addition can be judged on its own merits with real code to look at.
+
+Principle 3 is the newest and the most consequential: several things designed in earlier rounds of
+this conversation were cut by it. The Roadmap records each one with what it costs, so nothing is
+lost — only postponed.
 
 ## Architecture at a glance
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  kidx (this project) — typed schema/index/migration DSL      │
-│  Store<R>, Field<R,Z>, Index<R>, Schema/Migration, Engine     │
-└───────────────────────────┬───────────────────────────────────┘
-                             │  Engine interface (the only platform seam)
-              ┌──────────────┴──────────────┐
-              ▼                              ▼ (later, not now — see "not building")
-   IndexedDbEngine (jsMain)          KormiumEngine (jvmMain/nativeMain)
-   built on JuulLabs/indexeddb        built on kormium-sqlite / native SQLite
-   (vendored or depended-on)          — only if a non-web stramus client ever exists
+┌────────────────────────────────────────────────────────────────────┐
+│  kidx-core — the DSL, platform-free                                 │
+│  Row, Field/FieldType, Store, Index, Schema/Migration, Query,        │
+│  ReadScope/WriteScope                                                │
+└────────────────────────────┬───────────────────────────────────────┘
+                              │  engine seam (internal)
+                              ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  kidx-indexeddb (js/wasmJs) — the only engine                        │
+│  vendored JuulLabs/indexeddb core: transaction lifetime discipline    │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
-Full-text search is **not** part of this project. It is a separate concern, already solved by
-[kromus](../kromus)'s `TextIndex` (BM25), kept live via `kromus-sync`. See "Search" below.
+The engine seam stays **internal**: it exists so the DSL module has no platform dependency, not as a
+public extension point. There is exactly one engine and no plan for another (see "Explicitly
+rejected").
+
+Full-text search is not part of kidx: it is an in-memory concern, solved independently by
+[kromus](../kromus)'s `TextIndex` (BM25).
 
 ## Decisions made, and why (read this before changing any of it)
 
 ### 1. No `Catalog` phantom type
 
-Kormium parameterizes `Table<G: Catalog, T: Entity>` so that tables belonging to different logical
-databases can't be mixed up inside one process — a real concern for a general-purpose library used
-by servers that may hold several catalogs. stramus's client opens exactly one local database per
-browser instance; there is nothing to disambiguate. `Store<R>` here takes **no** catalog type
-parameter. (This still holds even if a non-web engine is added later — that varies the *engine*, not
-the *catalog*; there's still exactly one logical schema.)
+Kormium parameterizes `Table<G: Catalog, T: Entity>` so tables belonging to different logical
+databases cannot be mixed up inside one process, and `Database<out G>` is covariant so backend
+factories stay catalog-agnostic while user code pins the catalog by assignment.
+
+kidx does not carry it. A `Schema` names exactly one IndexedDB database, and `Store<R>` takes no
+catalog parameter. If an application opens two kidx databases, passing a store of one into a scope of
+the other is not caught by the compiler — it fails at runtime, because IndexedDB rejects a
+transaction naming a store the database does not have. That failure is immediate and deterministic,
+not data-dependent.
+
+A deliberate simplification, and the one Kormium concept kidx drops on purpose. Reintroducing it is a
+breaking change to every signature, so if multi-database support is ever wanted, decide it before the
+first stable release.
 
 ### 2. No `init { col1; col2; ... }` boilerplate
 
-Kormium's own current schema code (including stramus's live `core/.../Schema.kt`) uses this pattern
-to force-reference every declared column, on the assumption that an unreferenced property inside an
-otherwise-used `object` could be stripped by dead-code elimination in a production Kotlin/JS build.
+Some Kormium schema code force-references every declared column inside `init{}`, on the assumption
+that an unreferenced property inside an otherwise-used `object` could be stripped by dead-code
+elimination in a production Kotlin/JS build.
 
-**This was tested against stramus's real production build, not assumed.** A throwaway column
-(`dceProbeXyz123`) was added to the `Sections` table, once referenced in `init{}`, once not, and
-`./gradlew :extension:jsBrowserDistribution` was run both times. In **both** cases the column's live
-registration code (not just its name as a string) survived in the minified `stramus.js` bundle —
-confirmed by inspecting the surrounding compiled code, not just grepping for the identifier. Kotlin's
-object initialization runs all of an object's property initializers together; this toolchain does not
-strip individual unused properties out of an otherwise-live object.
+**This was tested against a real minified production Kotlin/JS build, not assumed.** A throwaway
+column was added to a live table, once referenced in `init{}` and once not, and the production
+browser distribution was built both times. In **both** cases the column's live registration code
+(not just its name as a string) survived in the minified bundle — confirmed by inspecting the
+surrounding compiled code, not by grepping for the identifier. Kotlin's object initialization runs
+all of an object's property initializers together; this toolchain does not strip individual unused
+properties out of an otherwise-live object.
 
-Caveat, not tested: a table that is **never referenced by name anywhere outside its own declaration**
-(so the whole `object` is never touched) is a different, more drastic scenario and wasn't reproduced.
-If that ever becomes a real pattern (a store nothing ever queries directly), re-verify before assuming
-it's safe.
+The more drastic scenario — a store **never referenced by name anywhere outside its own
+declaration**, so the whole `object` is never touched — was not reproduced. In kidx it is
+structurally impossible anyway: a store only exists in the database because a `Migration` lists
+`SchemaStep.CreateStore(store)`, so the migration list *is* the force-reference for every store.
 
-Conclusion: **do not carry the `init{}` pattern into kidx.** This also matches Kormium's own canonical,
-documented example (`kormium/readme.md`), which doesn't use it either — the pattern in stramus's
-current schema appears to be defensive/cargo-culted, not required by the current toolchain.
+Conclusion: **do not carry the `init{}` pattern into kidx.** It also matches Kormium's own canonical
+documented example, which does not use it either.
 
-### 3. Don't reuse Kormium's `Column` / `Entity` / `ColumnType` classes
+### 3. Reuse Kormium's `Entity` slot model, for reading; do not reuse `Column` / `ColumnType`
 
-Investigated directly in `kormium-core/src/commonMain/kotlin/{Column,ColumnType,Entity}.kt`. All three
-are SQL-executor-coupled down to the wire level, not reusable as passive type descriptors:
+**Do not reuse `Column` / `ColumnType`.** Both are SQL-executor-coupled down to the wire level:
+`Column` implements `Expression`/`Operand` and renders `toSql(builder: ParamBuilder)` — it is a
+query-AST node, not schema metadata; `ColumnType<T>.read(rs: ResultSet, index: Int)` reads from a
+JDBC-shaped result set by column index and `toParam` binds SQL parameters. Reusing them would mean
+faking a `ResultSet` over IndexedDB to satisfy an interface shape that does not fit — exactly the
+force-fitting this project exists to avoid.
 
-- `Column` implements `Expression`/`Operand` and renders `toSql(builder: ParamBuilder)` — it's a query-DSL
-  AST node, not a schema-metadata value.
-- `ColumnType<T>.read(rs: ResultSet, index: Int)` reads from a JDBC-shaped `ResultSet` by column index,
-  and `toParam` binds SQL parameters. Neither has anything to decode an arbitrary IndexedDB value from.
-- `Entity`'s slot storage exists specifically to distinguish "absent" (omit from SQL `INSERT`/`UPDATE`)
-  from "explicit null" (write SQL `NULL`) — meaningless for IndexedDB's `put()`, which always writes a
-  value whole.
+**Do reuse the `Entity` slot model.** Kormium's `Entity` stores values in an `Array<Any?>` indexed by
+`Column.ordinal` (position in declaration order), with a private `ABSENT` sentinel distinguishing
+"never assigned" from "explicitly null", and the column itself *is* the property delegate on the
+entity (`var name by Users.name`). No reflection, no serialization, no per-row allocation beyond the
+value array.
 
-Reusing these would mean faking a `ResultSet` adapter over IndexedDB just to satisfy an interface shape
-that doesn't fit — exactly the "force-fitting" the whole project exists to avoid.
+Why the sentinel is worth keeping here, precisely:
 
-**What to keep**: the *vocabulary*. Same logical type names (`UUID`, `Text`, `Instant`, `Int`, `Long`,
-`Boolean`, `Bytes`, …) for consistency with the rest of the codebase, but as a fresh, independent
-`FieldType`/`Field` implementation with zero dependency on kormium-core.
+- **On the read path it is the point.** IndexedDB has no `ALTER TABLE`. When a migration adds a
+  field, records already on disk simply do not have that property — and JavaScript hands us the
+  distinction natively: a missing property reads back `undefined`, an explicit null reads back
+  `null`. Kormium's hydrate-time diagnostic (a non-null field came back absent → name the store, the
+  field, the expected type, and what to do) turns the single most likely IndexedDB schema bug into a
+  loud, actionable error instead of an `undefined` surfacing much later. `isSet(field)` exposes the
+  same distinction to application code.
+- **On the write path it is nearly vestigial, and that is worth saying out loud.** In Kormium an
+  absent field is *omitted* from the `INSERT` so the database can apply its default. IndexedDB has no
+  defaults: omitting a property means storing a record without it, i.e. manufacturing by hand the
+  exact problem the read path exists to catch. So `add`/`put` with an absent non-null field is a loud
+  error, and the only legitimate absent value on write is an unfilled `autoIncrement` primary key
+  (decision 12).
 
-### 4. Engine: adopt JuulLabs/indexeddb's low-level primitives, not its public surface
+Two things Kormium has that kidx does not:
 
-[`JuulLabs/indexeddb`](https://github.com/JuulLabs/indexeddb) (Apache 2.0, Kotlin/JS + Kotlin/WASM,
-actively maintained — WASM support added 2025) already solves the one genuinely hard, risky part of
-this project: **IndexedDB transaction lifetime**. An `IDBTransaction` auto-commits when the JS event
-loop returns without a pending `IDBRequest`; suspend across the wrong kind of await and the transaction
-can silently close under you. JuulLabs solves this with `Dispatchers.Unconfined` plus a hard rule,
-enforced by only exposing transactional operations as extension functions scoped to `Transaction`/
-`WriteTransaction` receivers: *"you must not call any suspend function except those provided by this
-library and scoped on Transaction."* This is not a documentation convention — the API shape makes it
-close to impossible to violate by accident.
+- **No `overflow` map.** A `Row` belongs to exactly one `Store` — the first assignment fixes the
+  owner, and touching a field of another store throws, naming both. A second, invisible access path
+  into row storage is not worth a rare convenience.
+- **No `unset()`.** Its only use is assembling patch entities, and patch updates are not in v1.
 
-Primitives to build on (real signatures, from `core/src/webMain/kotlin/{Database,Transaction,ObjectStore,Index,Queryable}.kt`):
+A `Row` is not a DTO, exactly as Kormium says of `Entity`: its slot storage is an implementation
+detail, it is not serializable, and it must not be sent through `postMessage` or a `structuredClone`
+to another context. Map it to your own type at the boundary.
+
+And one inherited implementation whose *justification* is different here, so nobody re-derives the
+wrong one: Kormium's value array is indexed by ordinal because SELECT results are positional, which
+saves a name→index map per row (their comment measures ~47ns vs ~0.5ns). IndexedDB records are JS
+objects accessed by name, so that reason does not apply at all. The array is still right — as compact
+slot storage able to hold the `ABSENT` sentinel, versus a `Map<String, Any?>` per row — but that is
+the reason to write down.
+
+Field type *vocabulary* stays Kormium's (`UUID`, `Text`, `Int`, `Instant`, `Boolean`, `Bytes`, …), as
+a fresh implementation with zero dependency on kormium-core, and `convert` — Kormium's extension
+point for custom types — is copied outright.
+
+### 4. Engine: vendor JuulLabs/indexeddb's low-level primitives
+
+[`JuulLabs/indexeddb`](https://github.com/JuulLabs/indexeddb) (Apache 2.0, Kotlin/JS + Kotlin/Wasm,
+actively maintained) already solves the one genuinely hard, risky part of this project: **IndexedDB
+transaction lifetime**. An `IDBTransaction` auto-commits when the JS event loop returns without a
+pending `IDBRequest`; suspend across the wrong kind of await and the transaction closes under you.
+JuulLabs solves this with `Dispatchers.Unconfined` plus a hard rule enforced by only exposing
+transactional operations as extension functions scoped to `Transaction`/`WriteTransaction`
+receivers: *"you must not call any suspend function except those provided by this library and scoped
+on Transaction."* The API shape makes it close to impossible to violate by accident.
+
+Primitives to build on (real signatures, from `core/src/webMain/kotlin/`):
 
 ```kotlin
 suspend fun openDatabase(
@@ -135,235 +199,830 @@ class Database {
 //   Database.createObjectStore/deleteObjectStore, ObjectStore.createIndex/deleteIndex
 ```
 
-Values are raw `IDBValue`/`JsAny` — the library is explicit that passing Kotlin objects straight through
-is "probably wrong" and expects an `external interface` at the boundary. **This is exactly the gap kidx
-fills**: JuulLabs gives safe transactions and raw storage, kidx gives typed schema, typed queries, and
-migrations on top.
+Values are raw `IDBValue`/`JsAny` — the library is explicit that passing Kotlin objects straight
+through is "probably wrong". **That gap is what kidx fills**: JuulLabs gives safe transactions and
+raw storage, kidx gives typed schema, typed rows, typed queries and migrations on top.
 
-Decision still open: vendor JuulLabs' `core` module directly into kidx (full read + fork, given stramus
-is a reviewed Chrome extension where minimizing third-party surface has a real, documented payoff — see
-`store/submission.md`) vs. take it as a normal dependency. Leaning vendor; not decided. Either way, do
-not modify its transaction-scoping discipline — that's the part worth not touching.
+**Decision: vendor the `core` module into kidx** rather than depend on it, for full control over the
+code kidx's own guarantees rest on and zero third-party surface for consumers. The honest cost,
+recorded so nobody rediscovers it: upstream fixes — including fixes to the transaction-lifetime
+discipline, the riskiest part — must be ported by hand, and Apache-2.0 attribution obligations (a
+`NOTICE` file, retained license headers, a clear statement of what was modified) are now kidx's to
+carry. **Do not modify its transaction-scoping discipline**; that is the part worth not touching.
 
-### 5. Query surface is deliberately narrower than Kormium's `where{}`
+### 5. Two scope types, and the suspend discipline inside them
 
-A generic `where{}` builder would let you write predicates IndexedDB cannot execute against an index,
-silently falling back to a full scan — precisely the kind of hidden cost the whole project exists to
-avoid. Instead, queries are built **against a specific declared `Index<R>`**: leading fields must be
-pinned with `.eq()`, only the trailing field may be a range (`gt`/`lt`/`between`), sort order follows
-the index, and there is a `limit`. If what you want isn't expressible against a declared index, that's
-a compile-time/API-shape problem, not a silent-scan problem — declare the index you need.
+Kormium's first rule is that all queries run inside a scope: `db.transaction { }` /
+`db.autocommit { }`, with table operations existing **only** as member-extensions on `Scope<G>` — a
+`Table`'s own runners are `internal`. Outside a scope, `find` does not resolve.
 
-### 6. Search is out of scope for kidx — use kromus
+kidx keeps that exactly, because it is also what IndexedDB needs: JuulLabs' safety comes from scoping
+operations to a transaction receiver, and Kormium's scope-extension pattern lines up with it
+one-to-one. Two differences, both forced by the engine:
 
-Multi-word search (currently a `LIKE`-scan in stramus's SQLite store, capped at 4 words, no ranking)
-does not belong on top of IndexedDB at all. [kromus](../kromus)'s `TextIndex` (BM25 inverted index,
-pluggable `Analyzer` for stemming/stopwords/n-gram typo-tolerance) is a strict upgrade over the current
-behavior, not just a port of it. It runs **in memory**, independent of storage, and is kept fresh via
-`kromus-sync`'s `Flow<List<T>>.syncTo(index, keyOf, versionOf) { }` — incremental reconciliation by key
-+ version, not a full rebuild per change. The flow it consumes can come from kidx's `Engine` (e.g. a
-`getAll` + a change notification) the same way `kormium-observe`'s `Table.observe(db){}` feeds it in
-the SQL world.
+- The distinction is **readonly vs readwrite**, not "no BEGIN vs BEGIN" — every IndexedDB operation
+  is inside a transaction, always. So the two entry points are `db.read { }` (→ `ReadScope`) and
+  `db.write { }` (→ `WriteScope : ReadScope`). Two distinct types, so writing inside a read scope
+  does not compile. `autocommit` was rejected as a name: in IndexedDB it would mean something other
+  than what it means in SQL.
+- IndexedDB requires the stores a transaction touches to be **declared up front**:
+  `db.write(Users, Orders) { … }`. Kormium has no equivalent. Forgetting one is a runtime error from
+  inside the block, so this is a gotcha to document, not a compile-time guarantee.
 
-Open, unresolved:
-- **Persistence of the built index across reloads** — via `kromus-kemus` (serialize into a kemus store)
-  vs. just rebuilding in memory on startup. Leaning toward rebuild-on-startup given stramus's data
-  scale (personal card collections, not large), but not measured.
-- **Field weighting** — `TextIndex.add(key, text, attributes)` takes one `text` string per document, no
-  built-in per-field boost. Current search matches title/url/content; if title matches should outrank
-  content matches, that needs a manual trick (e.g. repeating title tokens in the composed text) — not
-  designed yet.
-- **Not yet measured**: BM25 query latency on a seeded large card collection (a few thousand cards).
-  Worth a quick benchmark before committing to "definitely fine at this scale."
+Everything is suspend-only; there is no blocking mirror (this is the browser). Several reads inside
+one scope see one consistent snapshot.
+
+**The discipline has to be re-established, not just inherited.** Decision 4 credits JuulLabs with
+making the transaction-lifetime rule hard to violate — but that protection comes from *their*
+receiver type, and kidx's scope is its own class. Nothing in the sketch stops a user writing
+`delay(100)` or an HTTP call inside `db.write { }`, after which the transaction silently commits or
+closes and every later operation in the block fails. Describing the hazard is not inheriting the
+protection.
+
+Kotlin has exactly one tool for this: **`@RestrictsSuspension`** on the scope classes. Inside a
+suspend lambda whose receiver is annotated, only suspend functions that are members or extensions of
+that receiver may be called — which is precisely the JuulLabs rule, checked by the compiler instead
+of trusted to a doc comment. It also makes a nested `db.write { }` inside another scope a compile
+error, which is the failure mode described in decision 6.
+
+Its cost, which must be weighed before committing: the restriction also forbids `Flow.collect`, which
+`stream()` needs. The way out is for kidx to declare its own `collect` as a scope extension, so the
+one legitimate suspending consumer is inside the allowed set. Check first whether the vendored
+JuulLabs code already uses the annotation; if it does not, this is a place where kidx can be stricter
+than upstream rather than merely as strict.
+
+### 6. Failure: the whole transaction, no savepoints, no nesting
+
+Nothing about this is inherited for free, and all of it is observable behaviour, so it is specified
+rather than left to the implementation:
+
+- **An exception thrown inside the block aborts the transaction, then propagates.** This has to be
+  explicit in the implementation, not left to unwinding: an IndexedDB transaction commits by itself
+  once the event loop drains without a pending request, so an exception could otherwise escape *after*
+  the writes were already committed. kidx calls `abort()` on the way out.
+- **An engine-initiated abort discards everything in the transaction**, not just the failing
+  operation. A loop of `add`s inside one `db.write` is all-or-nothing — a feature, and the reason a
+  batch belongs in one scope, but it also means one `ConstraintError` on record 900 undoes 899 good
+  writes.
+- **There are no savepoints and no partial rollback.** Kormium's `savepoint { }` has no analogue and
+  will not get one; IndexedDB has no such concept.
+- **Scopes do not nest.** Opening `db.write` (or `db.read`) inside another scope's block deadlocks
+  when the store sets overlap: the inner transaction waits for a store the outer one holds, and the
+  outer cannot finish while suspended inside the inner. It is also a violation of the suspend
+  discipline regardless of overlap. `@RestrictsSuspension` (decision 5) makes it a compile error; if
+  that annotation turns out to be impractical, kidx must detect it via a coroutine-context marker and
+  throw immediately, naming the enclosing scope — never hang.
+- **Concurrent scopes are safe but serialized.** Two `db.write` calls touching the same store are
+  ordered by the engine, one waiting for the other. This is where isolation comes from, and it is
+  also why long-running work does not belong inside a write scope.
+
+### 7. Reads are the engine's read operations, and nothing else
+
+IndexedDB can read in exactly these ways, and each has one name in kidx:
+
+| kidx | engine call |
+|---|---|
+| `Store.get(key)` | `IDBObjectStore.get(key)` |
+| `Store.first(index) { … }` | `IDBIndex.get(range)` — first match in ascending order |
+| `Store.all()` | `IDBObjectStore.getAll()` |
+| `Store.find(index) { … }` | `IDBIndex.getAll(range, count)` |
+| `Store.stream(index) { … }` | `IDBIndex.openCursor(range, direction)` → `Flow<R>` |
+| `Store.count()` / `Store.count(index) { … }` | `IDBObjectStore.count()` / `IDBIndex.count(range)` |
+
+Consequences of that mapping, which the KDoc must state because they are not guessable:
+
+- **`first()` has no direction.** `IDBIndex.get` always returns the first match in ascending key
+  order. "The newest one" is `find`/`stream` with `direction = DESC` and `limit = 1`, which is a
+  cursor, not a `get`.
+- **`find` takes one of two paths.** Without a direction it is a native `getAll(range, count)` — one
+  call. With `direction = DESC` there is no native equivalent (`getAll` takes no direction), so it
+  becomes a cursor walk counting results. Same signature, materially different cost.
+- **`stream` is the primitive, `find` is the convenience.** A cursor is how IndexedDB reads; `find`
+  materializing the whole result is the shortcut. `stream` gives constant memory over a large store,
+  and its `Flow` must be collected inside the scope that produced it.
+- **No `findOne`.** It would be `find` with `limit = 1`, i.e. a second name for something that is
+  either `get`, `first`, or a one-element cursor walk depending on the query — the kind of uniform
+  surface that hides which engine call actually runs.
+
+A query is built **against a specific declared `Index<R>`** and is nothing but an `IDBKeyRange` plus
+a direction plus a count: leading index fields pinned with `eq`, at most one range (`gt`/`gtEq`/`lt`/
+`ltEq`/`between`) and only on the last field named, in index-field order. If what you want is not
+expressible against a declared index, declare the index you need.
+
+```kotlin
+Orders.find(Orders.byUser) {
+    Orders.userId eq userId          // leading field: pinned
+    Orders.createdAt gt since        // trailing field: the range
+    direction = DESC
+    limit = 50
+}
+```
+
+There is deliberately **no `where { }` wrapper**, even though Kormium has one. In Kormium, two
+`where` blocks are a boolean AND and may be given in any order; here the statements are positional
+constraints on successive index fields, order is significant, and no boolean logic exists. Borrowing
+the word would promise a semantics kidx does not have — the exact leak principle 1 exists to
+prevent. The fields are still named at the call site, which is the readability that mattered.
+
+`direction` is an assignment, not Kormium's `orderBy DESC column` infix: there is no column to give
+it. The order is the index's own, and the only choice is which way the cursor walks.
+
+**No `offset`.** Skipping N records in IndexedDB means stepping a cursor N times, i.e. actually
+reading N records; an expensive query would look exactly like a cheap one. Keyset pagination
+(continue from the last key) is the only form — which is what Kormium's own docs recommend anyway.
+kidx makes the recommended pattern the only pattern.
+
+Two edge cases resolved at query-build time rather than by the engine: an **inverted range**
+(`lower > upper`) makes IndexedDB throw `DataError`, so kidx rejects it when the query is built, with
+a message naming both bounds; **`limit = 0`** returns an empty list without touching the engine.
+
+Not modeled at all (document this like Kormium's gotchas list): `or`, `not`, `like`, `inList`, joins,
+aggregates other than `count`, subqueries, grouping.
+
+### 8. Writes are the engine's three write operations, and nothing else
+
+| kidx | engine call | semantics |
+|---|---|---|
+| `Store.add(row)` | `IDBObjectStore.add` | fails if the key exists; returns the key |
+| `Store.put(row)` | `IDBObjectStore.put` | overwrites; returns the key |
+| `Store.delete(key)` | `IDBObjectStore.delete(key)` | — |
+
+The names are the engine's, not Kormium's `insert`/`upsert`. `add`/`insert` and `put`/`upsert` do
+line up semantically, but `upsert` in Kormium carries a conflict target and a separate update entity,
+neither of which exists here — and a reader who expects `onConflict` and does not find it has been
+misled by the name. Both return the stored key, which is also how an `autoIncrement` key comes back
+(decision 12); there is no `returning: Boolean` flag, because IndexedDB has no defaults, triggers or
+computed values for a re-read to discover — the generated key is the only thing it can tell you.
+
+**`put` rewrites the whole record.** There is no partial write in IndexedDB. So a row carrying a
+large `Blob` re-stores that blob on every `put`, even if only a small text field changed. The design
+consequence, worth stating rather than leaving as folklore: **keep large binaries in their own
+store**, keyed by the owning row's key.
+
+Missing on purpose, both in the Roadmap: patch updates (`update(patch)` would be
+get + merge + put, i.e. kidx simulating an `UPDATE … SET`) and insert-or-ignore (`add` plus catching
+a `ConstraintError`, i.e. exceptions as control flow — and see the Roadmap for why it may not even be
+implementable that way).
+
+### 9. What a stored record actually is
+
+- **Keys are in-line.** A store is created with a `keyPath`, so the primary key lives inside the
+  record and is always visible on the `Row`. Out-of-line keys (a key passed to `add`/`put` beside the
+  value) are not used. With `autoIncrement`, an in-line key path means the engine writes the generated
+  key into the stored record itself — which is why `add` can hand it back and why the row's key field
+  is populated on a re-read.
+- **The record holds exactly the declared fields.** A nullable field with no value assigned is stored
+  as an explicit `null`, not omitted — so on the read path "absent" means one thing only: *this record
+  predates the field*. That keeps `isSet` a precise answer to a precise question.
+- **Undeclared properties are dropped.** kidx reads only declared fields, and `put` writes only
+  declared fields, so a record carrying properties kidx does not know about loses them the moment it
+  is rewritten. Relevant if a database is shared with non-kidx code.
+- **A stored value of the wrong type is a named failure**, distinct from absent and from null: a
+  number where `Field.Text()` was declared names the store, the field, the expected type and the
+  value found, in the style of Kormium's `ResultMappingException`. This is a real case for a database
+  a user can edit by hand in devtools.
+
+### 10. Physical representation of values, and compiler-enforced indexability
+
+Each `FieldType` picks how a Kotlin value is stored. The constraint that shapes all of it: a **valid
+IndexedDB key** is only a number, a string, a `Date`, an `ArrayBuffer` (or a view), or an array of
+those. `null`, `undefined`, `boolean` and `BigInt` are not valid keys — and IndexedDB does not raise
+an error when a record's key would be invalid, it **silently omits that record from the index**.
+
+| Kotlin type | Stored as | Key-valid |
+|---|---|---|
+| `Uuid` | canonical 36-char string | yes |
+| `String` | string | yes |
+| `Int` | number | yes |
+| `Double` | number | yes |
+| `Instant` | native `Date` | yes |
+| `ByteArray` | `ArrayBuffer` | yes |
+| `Boolean` | `true`/`false` | **no** |
+| `Blob` | native `Blob` | **no** |
+
+That set is deliberately shorter than Kormium's thirteen. `Long`, `Short`, `Float`, `LocalDate`,
+`LocalDateTime`, `Decimal` and JSON are not built in: each would need a representation decision that
+is the application's to make, and `convert` is the supported way to make it.
+
+- **`Long` is not in the built-in set.** In Kotlin/JS it is not a JS number but an object with
+  low/high halves; structured-cloning it would store garbage. The alternatives were a number (silent
+  precision loss above 2^53) or `BigInt` (exact, but not a valid key, so no index and no primary key
+  over it) — both bad enough to leave out.
+- **`Instant` is a native `Date`**, so a timestamp reads as a timestamp in devtools and sorts
+  chronologically as a key. Precision is milliseconds — a stated property of the type, not a silent
+  truncation.
+- **`Uuid` is the canonical string**, not a 16-byte buffer: what is on disk is what is in the logs
+  and in the code, at the cost of 36 bytes instead of 16. For UUIDv7 the lexicographic order is also
+  the chronological one.
+- **`Blob` is stored natively.** IndexedDB is the one engine here that can: a `Blob` is not pulled
+  into memory when its record is read, and it feeds `URL.createObjectURL` directly. A capability SQL
+  backends do not have at all, so taking it is principle 1 rather than an exception — accepting that
+  a web-platform type appears in a domain `Row`. `Field.Bytes()` → `ByteArray` is there too, for data
+  the application actually wants in memory.
+
+Two rules follow, and both are checked **at compile time**:
+
+- A field in an index or a primary key must be **non-null**. A nullable component makes the whole
+  compound key invalid, and IndexedDB responds by dropping the record from the index — a store with
+  ten records and an index containing three, no error anywhere. Sentinel-substituting `null` in the
+  codec (`""` in, `null` out) was considered and rejected: it hides state. An application that needs
+  such a field indexed gives it an explicit domain value for "none", visible in the code and in
+  devtools.
+- A field in an index must have a **key-valid `FieldType`**. `Field.Boolean()` therefore cannot be
+  indexed and cannot be a primary key; a flag that must be indexed is declared `Field.Int()` with 0/1
+  in the domain, explicitly.
+
+Mechanically, nullability *and* key-validity live in the field's class, the way Kormium puts
+nullability in `NotNullColumn`/`NullableColumn`: `NullableField`, `NotNullField`, and
+`KeyField : NotNullField`. `index()` and `primaryKey()` accept only `KeyField`. As a free
+consequence, `Field.Boolean().primaryKey()` does not compile either — the same way a nullable primary
+key cannot be expressed in Kormium, because `NullableSpec` simply has no `primaryKey()`.
+
+### 11. Key order and comparison — one collation, binary, unchangeable
+
+Sort order is not a kidx decision at all: the engine defines it, and every `find`, `stream` and range
+follows it. Written down because it surprises people:
+
+- **Across types**, keys order as: number < `Date` < `String` < binary < array. Mixed-type keys in one
+  index are legal and compare this way.
+- **Strings compare by UTF-16 code unit.** Not by locale, not case-insensitively, and IndexedDB has
+  no collation setting to change it. So `"Z"` sorts before `"a"`, `"ё"` sorts after `"я"`, and accents
+  land wherever their code points do. An ascending scan over a `Field.Text()` index is not
+  alphabetical in any human sense.
+- **Arrays compare element by element**, and a shorter array that is a prefix of a longer one comes
+  first. This is exactly the property that makes a compound index behave like a prefix scan, so it is
+  load-bearing rather than trivia.
+
+The consequence for applications, which belongs in the docs as a recipe: if you need
+locale-aware or case-insensitive ordering, store a **separate normalized field** (lower-cased, NFC,
+whatever the language needs) and index that one. kidx will not normalize behind your back — same
+stance Kormium takes on SQL collation, where its answer is to lower both sides explicitly. Matching
+text (as opposed to ordering it) is not an ordering problem at all: that is kromus.
+
+### 12. Keys: explicit, optionally composite, optionally generated
+
+- **The primary key is always declared.** Kormium falls back to "the column named `id`" when no
+  column is marked (`Table.primaryKey`). kidx has no such fallback: in IndexedDB the `keyPath` is
+  fixed when the store is created, and an implicit key inferred from a property name is exactly the
+  hidden behaviour principle 2 rejects. No `primaryKey()` in a store declaration is an error at
+  schema-open time, not a silent guess.
+- **Composite keys are supported** — IndexedDB's array `keyPath`, declaration order being key order,
+  under the same non-null and key-valid constraints as indexes.
+- **`autoIncrement` is supported.** The key generator is the only database-generated value IndexedDB
+  has. A primary key left absent is filled by the generator, and `add`/`put` return the key it
+  assigned. This is the one legitimate use of the absent state on the write path (decision 3).
+- **A field's stored name is its property name.** Kormium's `name = "…"` override exists because SQL
+  identifiers differ from Kotlin property names and need dialect quoting; in IndexedDB a name is just
+  a key in a JS object, there is no dialect, and renaming a stored property is a data migration
+  rather than a cosmetic change. The override is not carried over.
+
+### 13. Migrations, and structural verification when the database opens
+
+IndexedDB forces a monotonic integer `version` and gives schema changes exactly one place to happen —
+inside the version-change transaction. So a `Migration(version, steps)` is replayed for every
+`version > oldVersion`, each `SchemaStep` becoming a `createObjectStore` / `createIndex` / … call.
+That is the whole mechanism, and it is entirely native.
+
+(An earlier version of this spec claimed kidx's numbered migrations matched `kormium-migrate`'s shape
+"for consistency". They do not — `kormium-migrate` has no version numbers at all; it uses named
+string ids and a checksummed journal table. The statement was simply wrong. That journal is a good
+idea and is in the Roadmap, but it is a layer above the engine, not part of it.)
+
+The deliberate divergence from Kormium: **kidx owns DDL, Kormium does not.** Kormium is explicit that
+it does not own schema (`CREATE TABLE` is raw SQL; a migration is whatever SQL your backend needs).
+kidx has no choice — object stores and indexes can only be created by code inside the version-change
+transaction — so `SchemaStep` exists and is typed. This is the one place kidx is a superset rather
+than a copy; do not go looking for the Kormium analogue.
+
+**And then the schema is verified against the database, on every open.** IndexedDB reports its actual
+shape natively — `objectStoreNames`, a store's `keyPath` and `autoIncrement`, `indexNames`, an index's
+`keyPath` and `unique` — so kidx compares that with what the `Schema` declares and fails with a
+message naming the difference and the migration that should have produced it. One pass over metadata,
+no data read, no bookkeeping of its own.
+
+This is worth having in v1 for a reason beyond tidiness: it catches the most common real divergence —
+a migration that forgot an `AddIndex`, or a store created with a different `keyPath` — on any existing
+database, without remembering anything. The checksummed journal (Roadmap) answers a different
+question: *was an already-applied migration edited afterwards?* Structural verification cannot detect
+that, but it also does not need a history to work, which is why it goes first.
+
+### 14. Database lifecycle
+
+- **`openDatabase(schema)`** suspends until the database is open at the schema's version, running any
+  needed migrations and then the structural verification of decision 13.
+- **`onBlocked`.** If we are the one upgrading and another context still holds the database open at an
+  older version, the open request sits in `blocked` and waits. kidx invokes an `onBlocked` callback so
+  the application can say something useful ("close other tabs to finish updating") instead of
+  appearing frozen. There is no built-in timeout: how long to wait, and whether to give up, is the
+  application's policy.
+- **`onVersionChange`** is the mirror case: *we* hold an older version and another context wants to
+  upgrade. Default behaviour is to close our connection, so the other context is never blocked
+  indefinitely, after which our operations fail with an error saying the schema was upgraded elsewhere
+  and the page should reload. An application can install its own handler and take over — save a
+  draft, show a banner, close when ready — and the KDoc must state plainly that a handler which never
+  closes leaves the other context blocked forever. That is then a decision, deliberately made. This
+  is a hair away from Kormium's stance of shipping the seam and leaving policy to the caller (it ships
+  `ConcurrencyConflictException`, not a retry loop); the difference is that the do-nothing default
+  here hangs *another* execution context, so the safe behaviour is the default and the seam is the
+  opt-in.
+- **`close()`** is idempotent; afterwards every operation fails with a clear error rather than
+  reopening implicitly.
+- **`openDatabase` is not a singleton.** Two calls for the same schema give two independent
+  connections. kidx does not cache or deduplicate them, so an application that wants one connection
+  holds onto it itself.
+- **`deleteDatabase(name)`** is native (`indexedDB.deleteDatabase`) and is in v1 because both "reset
+  all data" and every test suite need it. It takes the same `onBlocked` callback: open connections
+  block a delete exactly as they block an upgrade.
 
 ## The DSL (design sketch — not compiled, not tested)
 
 ```kotlin
-abstract class Row
+abstract class Row   // slot storage + ABSENT sentinel, per decision 3
 
-sealed class FieldType<Z> {
-    object UUID : FieldType<kotlin.uuid.Uuid>()
-    object Text : FieldType<String>()
-    object Instant : FieldType<kotlin.time.Instant>()
-    object Int : FieldType<kotlin.Int>()
-    object Long : FieldType<kotlin.Long>()
-    object Boolean : FieldType<kotlin.Boolean>()
-    object Bytes : FieldType<ByteArray>()
+// ---- field types: value conversion only ----
+
+interface FieldType<T> {
+    /** Decodes a stored value; `null` for an explicit null. Absence is the engine's business, not this. */
+    fun read(stored: JsAny?): T?
+    fun toStored(value: T): JsAny?
+    val description: String          // diagnostics only, as in Kormium
 }
 
-class Field<R : Row, Z> internal constructor(
-    val store: Store<R>,
-    val fieldKey: String,
-    val name: String,
+/** A [FieldType] whose stored form is a valid IndexedDB key. Only these can be indexed or a primary key. */
+interface KeyFieldType<T> : FieldType<T>
+
+fun <Domain, Stored> FieldType<Stored>.convert(
+    toStored: (Domain) -> Stored,
+    fromStored: (Stored) -> Domain,
+): FieldType<Domain>
+
+/** Key-ness survives conversion, so an enum stored as text stays indexable. */
+fun <Domain, Stored> KeyFieldType<Stored>.convert(
+    toStored: (Domain) -> Stored,
+    fromStored: (Stored) -> Domain,
+): KeyFieldType<Domain>
+
+// ---- fields: nullability AND key-validity live in the type (decision 10) ----
+
+sealed class Field<Z, S : Store<R>, R : Row>(
+    private val store: S,
+    val name: String,                // the Kotlin property name; also the stored property name
     val nullable: Boolean,
     val type: FieldType<Z>,
+) {
+    internal var ordinal: Int = 0             // index into Row's value array
+    internal var isPrimaryKey: Boolean = false
+
+    open fun init() { store.addField(this) }
+
+    class NullableField<Z, S : Store<R>, R : Row>(/* … */) : Field<Z, S, R>(/* nullable = true */) {
+        operator fun getValue(row: R, property: KProperty<*>): Z?     // absent and explicit null both read as null
+        operator fun setValue(row: R, property: KProperty<*>, z: Z?)
+    }
+
+    open class NotNullField<Z, S : Store<R>, R : Row>(/* … */) : Field<Z, S, R>(/* nullable = false */) {
+        operator fun getValue(row: R, property: KProperty<*>): Z      // throws on absent, and on stored null
+        operator fun setValue(row: R, property: KProperty<*>, z: Z)
+    }
+
+    /** A non-null field whose type is a [KeyFieldType]: the only kind `index()` / `primaryKey()` accept. */
+    class KeyField<Z, S : Store<R>, R : Row>(/* type: KeyFieldType<Z> */) : NotNullField<Z, S, R>(/* … */)
+
+    // ---- specs: the declaration builders. Separate classes, not a hierarchy, so each carries its
+    // own provideDelegate return type (the shape Kormium uses).
+    open class Spec<Z>(private val type: FieldType<Z>) {
+        operator fun <S : Store<R>, R : Row> provideDelegate(store: S, property: KProperty<*>):
+            ReadOnlyProperty<S, NotNullField<Z, S, R>>
+        fun nullable(): NullableSpec<Z>
+    }
+
+    open class KeySpec<Z>(private val type: KeyFieldType<Z>) {
+        operator fun <S : Store<R>, R : Row> provideDelegate(store: S, property: KProperty<*>):
+            ReadOnlyProperty<S, KeyField<Z, S, R>>
+        fun nullable(): NullableSpec<Z>                          // a nullable field is not indexable anyway
+        fun primaryKey(autoIncrement: Boolean = false): PrimaryKeySpec<Z>   // only here: no nullable, no non-key PKs
+    }
+
+    class NullableSpec<Z> internal constructor(/* … */)     // → NullableField
+    class PrimaryKeySpec<Z> internal constructor(/* … */)   // → KeyField with isPrimaryKey = true
+
+    // ---- the built-in types (decision 10), nested classes as in Kormium ----
+    class UUID : KeySpec<kotlin.uuid.Uuid>(UuidFieldType)
+    class Text : KeySpec<String>(TextFieldType)
+    class Int : KeySpec<kotlin.Int>(IntFieldType)
+    class Double : KeySpec<kotlin.Double>(DoubleFieldType)
+    class Instant : KeySpec<kotlin.time.Instant>(InstantFieldType)
+    class Bytes : KeySpec<ByteArray>(BytesFieldType)
+    class Boolean : Spec<kotlin.Boolean>(BooleanFieldType)
+    class Blob : Spec<org.w3c.files.Blob>(BlobFieldType)
+
+    companion object {
+        fun <Z> of(type: FieldType<Z>): Spec<Z>
+        fun <Z> of(type: KeyFieldType<Z>): KeySpec<Z>
+        inline fun <reified E : Enum<E>> enum(): KeySpec<E>     // convert() over text
+    }
+}
+
+/** True when [field] had a value in the stored record, including an explicit null (decision 9). */
+fun <R : Row> R.isSet(field: Field<*, *, R>): Boolean
+
+// ---- stores and indexes ----
+
+abstract class Store<R : Row>(val storeName: String, val factory: () -> R) {
+    val primaryKey: List<Field.KeyField<*, *, R>>    // declaration order; array keyPath when > 1
+    internal val fields: Array<Field<*, *, R>>
+    internal fun hydrate(values: Array<Any?>): R     // factory() + adopt(values, this)
+    internal fun addField(field: Field<*, *, R>)
+}
+
+class Index<R : Row> internal constructor(
+    val name: String,
+    val fields: List<Field.KeyField<*, *, R>>,
+    val unique: Boolean,
 )
 
-sealed class FieldSpec<Z>(private val name: String?, private val type: FieldType<Z>) {
-    operator fun <R : Row> provideDelegate(store: Store<R>, prop: KProperty<*>): ReadOnlyProperty<Store<R>, Field<R, Z>> {
-        val field = Field(store, prop.name, name ?: prop.name, nullable = false, type)
-        store.registerField(field)
-        return ReadOnlyProperty { _, _ -> field }
-    }
-    fun nullable(): NullableFieldSpec<Z> = NullableFieldSpec(name, type)
-    fun primaryKey(): PrimaryKeyFieldSpec<Z> = PrimaryKeyFieldSpec(name, type)
-}
+fun <R : Row> Store<R>.index(
+    vararg fields: Field.KeyField<*, *, R>,
+    unique: Boolean = false,
+): ReadOnlyProperty<Store<R>, Index<R>>
 
-object Field {
-    fun UUID() = object : FieldSpec<kotlin.uuid.Uuid>(null, FieldType.UUID) {}
-    fun Text() = object : FieldSpec<String>(null, FieldType.Text) {}
-    fun Instant() = object : FieldSpec<kotlin.time.Instant>(null, FieldType.Instant) {}
-    fun Boolean() = object : FieldSpec<kotlin.Boolean>(null, FieldType.Boolean) {}
-    // Long, Int, Bytes follow the same shape.
-}
-
-open class Store<R : Row>(val name: String, val new: () -> R) {
-    internal val fields = mutableListOf<Field<R, *>>()
-    internal lateinit var primaryKey: Field<R, *>
-    internal fun registerField(f: Field<R, *>) { fields += f }
-}
-
-class Index<R : Row>(val name: String, val fields: List<Field<R, *>>, val unique: Boolean = false)
-
-fun <R : Row> Store<R>.index(vararg fields: Field<R, *>): ReadOnlyProperty<Store<R>, Index<R>> = TODO()
+// ---- schema and migrations ----
 
 sealed interface SchemaStep {
     class CreateStore<R : Row>(val store: Store<R>) : SchemaStep
-    class AddIndex<R : Row>(val storeName: String, val index: Index<R>) : SchemaStep
+    class AddIndex<R : Row>(val store: Store<R>, val index: Index<R>) : SchemaStep
     class DropIndex(val storeName: String, val indexName: String) : SchemaStep
     class DropStore(val storeName: String) : SchemaStep
 }
+
 class Migration(val version: Int, val steps: List<SchemaStep>)
-class Schema(val migrations: List<Migration>) { val version get() = migrations.maxOf { it.version } }
 
-interface Engine {
-    suspend fun open(schema: Schema)
-    suspend fun <R : Row, K : Any> get(store: Store<R>, key: K): R?
-    suspend fun <R : Row> put(store: Store<R>, value: R)
-    suspend fun <R : Row, K : Any> delete(store: Store<R>, key: K)
-    suspend fun <R : Row> query(index: Index<R>, equals: List<Any?>, limit: Int? = null): List<R>
-    suspend fun transaction(vararg stores: Store<*>, block: suspend TxScope.() -> Unit)
+class Schema(val databaseName: String, val migrations: List<Migration>) {
+    val version: Int get() = migrations.maxOf { it.version }
+}
+
+// ---- lifecycle (decision 14) ----
+
+suspend fun openDatabase(
+    schema: Schema,
+    onBlocked: () -> Unit = {},                                        // another context holds an older version
+    onVersionChange: suspend (VersionChangeSignal) -> Unit = { it.close() },
+): Database
+
+suspend fun deleteDatabase(name: String, onBlocked: () -> Unit = {})
+
+class Database internal constructor(/* … */) {
+    suspend fun <T> read(vararg stores: Store<*>, block: suspend ReadScope.() -> T): T
+    suspend fun <T> write(vararg stores: Store<*>, block: suspend WriteScope.() -> T): T
+    fun close()
+}
+
+// ---- queries ----
+
+/** A key range over one index, plus a direction and a count. Nothing more: see decision 7. */
+class Query<R : Row> internal constructor(/* … */)
+
+class QueryBuilder<R : Row> internal constructor(/* … */) {
+    var direction: Direction    // ASC (cursor `next`) or DESC (cursor `prev`)
+    var limit: Int?
+
+    infix fun <Z> Field.KeyField<Z, *, R>.eq(value: Z)
+    infix fun <Z : Comparable<Z>> Field.KeyField<Z, *, R>.gt(value: Z)
+    infix fun <Z : Comparable<Z>> Field.KeyField<Z, *, R>.gtEq(value: Z)
+    infix fun <Z : Comparable<Z>> Field.KeyField<Z, *, R>.lt(value: Z)
+    infix fun <Z : Comparable<Z>> Field.KeyField<Z, *, R>.ltEq(value: Z)
+    infix fun <Z : Comparable<Z>> Field.KeyField<Z, *, R>.between(range: ClosedRange<Z>)
+    // Validated when the query is built: the named fields must be a prefix of the index, in order,
+    // with at most one range and only on the last one named; bounds must not be inverted.
+}
+
+/** The key range, direction and limit a query builds — without a database. For tests and self-checks. */
+fun <R : Row> Store<R>.describe(index: Index<R>, block: QueryBuilder<R>.() -> Unit): QueryDescription
+
+// ---- scopes (decisions 5-8) ----
+
+@RestrictsSuspension
+open class ReadScope internal constructor(/* … */) {
+    suspend fun <R : Row> Store<R>.get(key: Any): R?
+    suspend fun <R : Row> Store<R>.first(index: Index<R>, block: QueryBuilder<R>.() -> Unit): R?
+    suspend fun <R : Row> Store<R>.all(): List<R>
+    suspend fun <R : Row> Store<R>.find(index: Index<R>, block: QueryBuilder<R>.() -> Unit): List<R>
+    suspend fun <R : Row> Store<R>.count(): Long
+    suspend fun <R : Row> Store<R>.count(index: Index<R>, block: QueryBuilder<R>.() -> Unit): Long
+
+    /** Cursor-backed; must be collected inside this scope. */
+    fun <R : Row> Store<R>.stream(index: Index<R>, block: QueryBuilder<R>.() -> Unit): Flow<R>
+
+    /** The one allowed suspending consumer: @RestrictsSuspension forbids the stdlib `collect` here. */
+    suspend fun <T> Flow<T>.collect(action: (T) -> Unit)
+}
+
+@RestrictsSuspension
+class WriteScope internal constructor(/* … */) : ReadScope(/* … */) {
+    suspend fun <R : Row> Store<R>.add(row: R): Any    // the stored key; generated one if autoIncrement
+    suspend fun <R : Row> Store<R>.put(row: R): Any
+    suspend fun <R : Row> Store<R>.delete(key: Any)
 }
 ```
 
-`Migration.version` maps directly onto IndexedDB's `onupgradeneeded(oldVersion, newVersion)`: replay
-every migration whose `version > oldVersion`, translating each `SchemaStep` into a call on JuulLabs'
-`VersionChangeTransaction` (`createObjectStore`, `createIndex`, …). Same numbered shape as
-`kormium-migrate`, deliberately, for consistency with the rest of the author's tooling.
-
-### Worked example: two of stramus's real tables
+### Worked example
 
 ```kotlin
-data class SectionRow(
-    val id: String, val title: String, val orderKey: String,
-    val deletable: Boolean, val collapsed: Boolean,
-    val pinSalt: String?, val pinHash: String?,
-    val updatedAt: Long, val deletedAt: Long?,
-) : Row()
-
-object Sections : Store<SectionRow>("sections", ::SectionRow) {
-    val id by Field.UUID().primaryKey()
-    val title by Field.Text()
-    val orderKey by Field.Text()
-    val deletable by Field.Boolean()
-    val collapsed by Field.Boolean()
-    val pinSalt by Field.Text().nullable()
-    val pinHash by Field.Text().nullable()
-    val updatedAt by Field.Instant()
-    val deletedAt by Field.Instant().nullable()
+class User : Row() {
+    var id by Users.id
+    var name by Users.name
+    var email by Users.email
+    var createdAt by Users.createdAt
+    var note by Users.note              // String?
 }
 
-object Collections : Store<CollectionRow>("collections", ::CollectionRow) {
+object Users : Store<User>("users", ::User) {
     val id by Field.UUID().primaryKey()
-    val sectionId by Field.UUID()
-    val title by Field.Text()
-    val orderKey by Field.Text()
+    val name by Field.Text()
+    val email by Field.Text()
     val createdAt by Field.Instant()
-    val readOnly by Field.Boolean()
-    val updatedAt by Field.Instant()
-    val deletedAt by Field.Instant().nullable()
+    val note by Field.Text().nullable()
 
-    val bySection by index(sectionId, orderKey)
+    val byEmail by index(email, unique = true)
 }
-```
 
-Query and transaction shape:
+class Order : Row() {
+    var id by Orders.id
+    var userId by Orders.userId
+    var total by Orders.total
+    var createdAt by Orders.createdAt
+}
+
+object Orders : Store<Order>("orders", ::Order) {
+    val id by Field.UUID().primaryKey()
+    val userId by Field.UUID()
+    val total by Field.Int()
+    val createdAt by Field.Instant()
+
+    val byUser by index(userId, createdAt)
+}
+
+val schema = Schema("app", listOf(
+    Migration(1, listOf(
+        SchemaStep.CreateStore(Users),
+        SchemaStep.AddIndex(Users, Users.byEmail),
+        SchemaStep.CreateStore(Orders),
+        SchemaStep.AddIndex(Orders, Orders.byUser),
+    )),
+))
+
+val db = openDatabase(schema, onBlocked = { ui.warn("Close other tabs to finish updating") })
+```
 
 ```kotlin
-suspend fun Engine.byCollection(collectionId: Uuid): List<CollectionRow> =
-    query(Collections.bySection, equals = listOf(collectionId))
+// by primary key — IDBObjectStore.get
+val user: User? = db.read(Users) { Users.get(id) }
 
-suspend fun Engine.deleteCollection(id: Uuid) = transaction(Sections, Collections, Cards) {
-    Collections.delete(id)
-    Cards.byGroup.eq(id).toList().forEach { Cards.delete(it.id) }
+// by unique index — IDBIndex.get
+val byEmail: User? = db.read(Users) { Users.first(Users.byEmail) { Users.email eq email } }
+
+// range over a declared index — IDBIndex.getAll(range, count)
+val recent: List<Order> = db.read(Orders) {
+    Orders.find(Orders.byUser) {
+        Orders.userId eq userId
+        Orders.createdAt gt since
+        limit = 50
+    }
+}
+
+// newest first — no native getAll for this; a cursor walk
+val newest: List<Order> = db.read(Orders) {
+    Orders.find(Orders.byUser) {
+        Orders.userId eq userId
+        direction = DESC
+        limit = 20
+    }
+}
+
+// constant memory over a large store; collected inside the scope
+db.read(Orders) {
+    Orders.stream(Orders.byUser) { Orders.userId eq userId }.collect { export(it) }
+}
+
+// one transaction over two stores; the reads inside see one snapshot,
+// and if anything throws, none of the writes happened
+db.write(Users, Orders) {
+    Users.put(user)
+    Orders.add(order)
+    Orders.delete(staleOrderId)
 }
 ```
 
-### Full schema — all 9 client tables
+### Recipes
 
-Source of truth for field names/types: stramus's current `core/src/commonMain/kotlin/stramus/core/db/Schema.kt`
-(Kormium 0.11.0). Reproduce the same fields for every table below; only the **indexes** differ from the
-SQL version, and two spots are deliberate improvements, not just ports:
+**Compare-and-set.** There is no optimistic-locking primitive: `put` writes whole records and returns
+a key, not an affected-row count. But a read and a write inside one `db.write` are atomic against
+other contexts, so check-then-write is a transaction, not a race:
 
-| Store | Fields (same as current SQLite schema) | Index |
-|---|---|---|
-| `sections` | id(PK), title, orderKey, deletable, collapsed, pinSalt?, pinHash?, updatedAt, deletedAt? | none (few rows/user, sorted in memory) |
-| `collections` | id(PK), sectionId, title, orderKey, createdAt, readOnly, updatedAt, deletedAt? | `bySection = (sectionId, orderKey)` |
-| `card_sections` | id(PK), collectionId, title, description?, orderKey, collapsed, updatedAt, deletedAt? | `byCollection = (collectionId, orderKey)` |
-| `cards` | id(PK), collectionId, cardSectionId?, kind, title, url, favicon?, content?, thumb?, mime?, blobSha?, orderKey, createdAt, updatedAt, deletedAt? | `byGroup = (collectionId, cardSectionId, orderKey)` — **improvement**: current SQL version only indexes `(collectionId, orderKey)` and post-filters by `cardSectionId` in code; a 3-field compound index makes `byCollection` a pure prefix range-scan |
-| `card_blobs` | cardId(PK), data — **improvement**: store raw `Blob`/`ArrayBuffer`, not a base64 `data:` URI (IndexedDB supports binary natively; current SQLite version is forced into base64 text) | none |
-| `usage` | url(PK), title, host, hits, lastUsedAt, deletedAt? | none |
-| `action_usage` | kind(PK), hits, lastUsedAt | none |
-| `favicons` | host(PK), dataUri, updatedAt | none |
-| `sync_meta` | composite PK (tbl, rowId), hash, rev | none |
-| `sync_state` | k(PK), v | none |
+```kotlin
+val applied = db.write(Users) {
+    val current = Users.get(id) ?: return@write false
+    if (current.updatedAt != expectedUpdatedAt) return@write false   // someone else got there first
+    Users.put(current.also { it.note = newNote; it.updatedAt = now })
+    true
+}
+if (!applied) error("stale write — reload and retry")
+```
+
+Without this, two contexts editing *different fields of the same row* silently clobber each other,
+because `put` rewrites everything (decision 8).
+
+**Keyset pagination.** The only pagination there is (decision 7). The cursor is the last key seen:
+
+```kotlin
+suspend fun page(userId: Uuid, after: Instant?, size: Int = 50) = db.read(Orders) {
+    Orders.find(Orders.byUser) {
+        Orders.userId eq userId
+        if (after != null) Orders.createdAt gt after
+        limit = size
+    }
+}
+```
+
+**Human-readable ordering.** Index order is UTF-16 binary (decision 11), so store what you want to
+sort by:
+
+```kotlin
+object Users : Store<User>("users", ::User) {
+    val name by Field.Text()
+    val nameSort by Field.Text()          // lowercase + NFC, written by the application
+    val byName by index(nameSort)
+}
+```
 
 ## Explicitly rejected approaches (don't re-propose these without new information)
 
-- **Dexie.js** — would work, but every call site crosses a JS-interop boundary (`external`/`dynamic`),
-  which is a permanent ongoing cost, not a one-time one, for a Kotlin/JS-native codebase. Also: Dexie's
-  ~25-30KB gzip and cross-browser Safari/private-mode fixes matter less here than they would for a
-  general-purpose library, since stramus ships primarily as a Chromium extension (`chromiumapp.org`
-  OAuth redirect URIs throughout the repo confirm this).
-- **RxDB / PouchDB** — bring their own replication/conflict-resolution machinery that would compete
-  with, not complement, stramus's already-built bespoke sync protocol (LWW + tombstones + hash-based
-  dirty check in `server/.../Sync.kt`). Heavier, and solves an already-solved problem.
-- **Reusing Kormium's `Column`/`Entity`/`ColumnType`** — see decision #3 above.
+- **Dexie.js** — every call site crosses a JS-interop boundary (`external`/`dynamic`), a permanent
+  ongoing cost in a Kotlin codebase, and the typed schema/row layer that is the whole point of kidx
+  would have to be built on top of it anyway. Dexie's cross-browser workarounds are real value that
+  kidx deliberately does not replicate — see "Browser support".
+- **RxDB / PouchDB** — they bring their own replication and conflict-resolution machinery, which
+  competes with rather than complements whatever sync an application already has. Heavier, and
+  opinionated about a problem kidx deliberately does not solve.
+- **Reusing Kormium's `Column` / `ColumnType`** — see decision 3 (the `Entity` slot model, by
+  contrast, *is* reused).
 - **A general Kormium-AST interpreter for IndexedDB** (walking Kormium's `Query`/`Expression`/`Join`
   commonMain AST and executing it against IndexedDB instead of rendering SQL) — considered seriously,
-  rejected: IndexedDB's real capability (single-index range scan) doesn't support arbitrary predicate
-  trees without silently falling back to full scans, defeating the "take only what IndexedDB offers"
-  principle. A purpose-built, index-scoped query surface (see above) was chosen instead.
-- **Reimplementing IndexedDB's storage engine on JVM/Native/desktop/mobile** — rejected. IndexedDB's
-  API shape is a browser-specific historical artifact, not something with independent merit to port.
-  If a non-web stramus client is ever built, give it a `KormiumEngine` implementing the same `Engine`
-  interface, backed by real SQLite via Kormium (which already runs on those platforms) — not a
-  hand-rolled IndexedDB clone. Not building this now; no non-web stramus client exists or is planned.
-- **`Catalog` type parameter** — see decision #1.
-- **`init{}` column-reference boilerplate** — see decision #2, tested empirically against stramus's
-  real production build.
+  rejected: IndexedDB's real capability cannot support arbitrary predicate trees without silently
+  falling back to full scans. A purpose-built, index-scoped query surface was chosen instead.
+- **A `where { }` block** — see decision 7: it would promise boolean logic over a positional key
+  range.
+- **`orderBy DESC column`** — Kormium's infix form needs a column operand; there is none here, the
+  order is the index's own. `direction = DESC`.
+- **Sentinel-substituting `null`** to keep nullable fields indexable — see decision 10. It works, and
+  it hides state.
+- **Storing `Long`** as a JS number or a `BigInt` — see decision 10.
+- **`insert`/`upsert` as names**, and `returning: Boolean` — see decision 8.
+- **A `name = "…"` override on a field**, and an implicit primary key inferred from a property named
+  `id` — see decision 12.
+- **Kormium's `overflow` map** (one `Row` class backing several stores) and **`unset()`** — see
+  decision 3.
+- **`offset`** and **`findOne`** — see decision 7.
+- **Savepoints / nested transactions** — IndexedDB has no such concept; see decision 6.
+- **Normalizing text for ordering** — see decision 11: kidx does not touch stored values, the
+  application stores a normalized field.
+- **Reimplementing IndexedDB's storage engine on JVM/Native** — rejected. IndexedDB's API shape is a
+  browser-specific historical artifact, not something with independent merit to port. kidx is a
+  browser library; an application that needs the same data on another platform wants a real database
+  there (Kormium already runs on those platforms), not an IndexedDB clone.
+
+## Browser support
+
+The position, following principle 3: **kidx does not paper over engine bugs.** Libraries like Dexie
+carry a real body of per-browser workarounds; replicating that would mean kidx behaving differently
+from the engine it wraps, in ways nobody can see from the call site. What kidx does instead is fail
+loudly and name what happened.
+
+Consequences an application has to handle itself, and which the README must list rather than leave to
+be discovered:
+
+- **IndexedDB can be unavailable.** Firefox in private browsing is the standard case: opening the
+  database throws. `openDatabase` surfacing that as a typed, named failure is kidx's whole
+  contribution here — an application that must work in private mode needs a fallback (in-memory, or a
+  degraded read-only mode), and that is an application decision.
+- **Storage can be evicted.** Notably on iOS/Safari, unused site data can be cleared. `persist()` and
+  quota reporting are in the Roadmap; the behaviour to design for is "the database may be empty next
+  time".
+- **Older engines have real bugs** — the ones Dexie works around. The supported set should be pinned
+  explicitly (a floor version per browser) rather than implied, and anything below it is out of scope
+  instead of silently half-working.
+
+## Testing
+
+Unresolved in shape, but the constraints are known and belong here so the next agent does not start
+from zero:
+
+- **IndexedDB exists only in a browser.** Real coverage therefore means browser tests (Karma, the way
+  Kormium's own JS backend is tested), which is also the only place engine-specific behaviour —
+  transaction lifetime, abort semantics, key ordering — can be verified at all.
+- **`fake-indexeddb` in a Node test source set** buys fast unit tests without a browser, at the price
+  of testing against a JS reimplementation with its own bugs. Useful for kidx's own logic (query
+  building, hydration, migration replay), not for anything in the previous bullet. Which of the two is
+  the default, and whether both exist, is open question 4.
+- **`describe(index) { … }`** needs no database at all: it returns the key range, direction and limit
+  a query builds, which is exactly what the prefix-rule validation should be tested against. It is
+  the analogue of Kormium's `renderSql { }`, and for the same reason — a way to assert what would run
+  without running it.
+- **`deleteDatabase`** (decision 14) is in v1 partly because every test needs a clean slate.
+
+## Roadmap
+
+Everything cut by principle 3, plus what was deferred for its own reasons. Each entry says what it
+costs, because the reason for cutting it is not that it is worthless.
+
+- **Change notification and `Flow` queries.** The largest thing not in v1, and pure emulation:
+  IndexedDB has no change events at all, so kidx would have to maintain them. Kormium's design ports
+  directly — `Scope` collects the stores written, fires them at a `WriteListeners` registry after the
+  transaction's `complete` event, and an observe module turns that into a conflated `channelFlow`
+  (`Store.observe(db) { }` → `Flow<List<R>>`). Its cross-context half is Kormium's
+  `NotificationTransport` (`suspend publish(stores)` + `subscribe(): Flow<Set<String>>` with
+  `connectNotifications` preventing echo), whose browser implementation is a `BroadcastChannel`
+  transport carrying signals between tabs, workers and extension service workers. Two costs to weigh
+  when it lands: invalidation is per-store, not per-key, so writing one row re-runs the whole query;
+  and the re-fetch plus re-hydration happens on the main thread, where Kormium's equivalent does not
+  block a UI. Purely additive — it can arrive without breaking any v1 signature.
+- **Patch updates.** `update(patch)` as get + merge-the-present-fields + put in one transaction,
+  restoring Kormium's "an update writes only the fields you assigned". Correct under transaction
+  isolation, and it needs `unset()` back. Watch the `Blob` case: a read-modify-write rewrites the
+  whole record, blob included (decision 8). Until it exists, the compare-and-set recipe above is the
+  supported way to do a targeted change.
+- **Insert-or-ignore.** `add` plus catching a `ConstraintError`. **Verify first whether it is even
+  implementable that way**: in IndexedDB a failed request's error event aborts the whole transaction
+  unless it is prevented, so "ignore and carry on" may not survive the wrapper — in which case it has
+  to be `get` + `add`, a different cost that has to be visible in the name and KDoc. The same
+  question governs what happens to a transaction when a `unique` index rejects a plain `add`
+  (decision 6 says the whole transaction goes; confirm against the vendored code).
+- **Migration journal with checksums.** Kormium records each applied migration's id and checksum and
+  fails fast if an already-applied one changed (`MigrationChecksumException`) — valuable in a browser,
+  where a user's database at version N was built by whatever code shipped then and cannot be re-run.
+  The catch that makes this urgent rather than optional: added later, it cannot know the checksum of
+  anything applied before it existed, so every pre-existing database stays unverifiable forever. It is
+  cheap only on day one. Structural verification (decision 13) covers the more common failure and
+  needs no history, which is why it went first and this did not.
+- **Type-level index arity.** Today `Index<R>` carries no field types, so "leading fields pinned with
+  `eq`, at most one range and only last" is validated when the query is built: immediate and
+  deterministic (first call, first test), but runtime. The typed alternative is `Index1<R,A>` /
+  `Index2<R,A,B>` / `Index3<R,A,B,C>` plus a stage-typed builder chain, where the prefix rule and
+  every value's type are checked by the compiler. Costs: a class per arity plus one per chain stage; a
+  ceiling on index width that the engine does not have; and the loss of named fields at the call site,
+  since a stage-typed chain takes values positionally. **Breaking — decide before the first stable
+  release.** `get(key: Any)` is the same problem in miniature (typing it needs the key type on `Store`,
+  or the same per-arity treatment for composite keys).
+- **Bulk delete.** Deleting a primary-key range is one engine call and is cheap to add. Deleting over
+  an index range is a cursor walk removing records one at a time, so it needs a name and KDoc that do
+  not make it look like the cheap one. `clear()` belongs with them. Deferred until there is real code
+  to look at, so the API follows how people actually delete.
+- **`addAll` / batching.** Kormium batches inserts into one statement; IndexedDB has no multi-record
+  write, so a batch is a loop inside one transaction. Worth having for the shorter call site and the
+  single transaction, not for any engine-level speedup — and note that one failure discards the whole
+  batch (decision 6).
+- **`Field.json<T>()`.** Kormium stores `@Serializable` values as JSON text. IndexedDB's structured
+  clone stores nested objects natively, so the useful form here may be "store the object, not a
+  string" — which changes what `read`/`toStored` do and whether kotlinx-serialization is involved at
+  all. Not designed.
+- **Storage quota and eviction.** Native `Blob` storage makes quota real:
+  `navigator.storage.persist()`, usage estimates, and a typed error for `QuotaExceededError`.
 
 ## Open questions for whoever continues this
 
-1. Vendor JuulLabs/indexeddb's `core` module into kidx, or take it as a Maven dependency? (Leaning vendor.)
-2. Persist kromus's `TextIndex` across page reloads, or rebuild in memory on startup? (Leaning rebuild.)
-3. Field-weighting scheme for search (title should likely outrank content/url matches) — not designed.
-4. Measure kromus BM25 query latency on a few-thousand-card seeded collection before committing.
-5. `Codec` — the actual encode/decode between Kotlin domain values (`Uuid`, `Instant`, …) and whatever
-   JuulLabs' `IDBValue`/`JsAny` machinery needs — is named in the sketch above but not designed at all.
-6. Module layout: mirror kormium's split (e.g. `kidx-core` for the DSL, a separate engine module) —
-   not decided; no `settings.gradle.kts` exists yet in this repo.
-7. Whether kidx becomes a genuinely independent published library (own Maven coordinates, like
-   kormium/kromus) or stays an internal-only module vendored into stramus — current framing assumes
-   the former (hence a separate sibling repo), but this hasn't been explicitly confirmed.
-8. No code has been written. Everything under "The DSL" is a sketch for shape/ergonomics, not
+1. **Module layout.** The sketch assumes `kidx-core` (DSL, platform-free) and `kidx-indexeddb` (the
+   engine, js/wasmJs), mirroring Kormium's core/backend split. Vendoring (decision 4) adds a
+   question: does the vendored JuulLabs core sit inside `kidx-indexeddb`, or in its own module (the
+   way `kormium-wasm-driver` is separate from the backends that share it)? A separate module keeps
+   the vendored code, its `NOTICE` and its upstream-diff discipline in one clearly-marked place. Not
+   decided; no `settings.gradle.kts` exists yet. Artifact coordinates and whether there is a
+   `kidx-bom` (as Kormium has) are part of the same decision.
+2. **Kotlin/Wasm target.** JuulLabs' core is organized around a `webMain` source set covering js and
+   wasmJs, so both targets should be reachable — verify against the actual vendored sources before
+   promising it in a README.
+3. **`@RestrictsSuspension`** (decision 5): confirm the vendored code's own stance, and confirm that
+   a scope-scoped `collect` is enough to keep `stream()` usable under the restriction. If it is not,
+   the fallback is a coroutine-context marker plus a runtime check, and that trade needs recording.
+4. **Test strategy** — browser-only, `fake-indexeddb`-first, or both (see "Testing").
+5. **Error hierarchy.** Kormium's typed exceptions (`ResultMappingException`,
+   `ConcurrencyConflictException`, `MigrationChecksumException`) have IndexedDB counterparts worth
+   naming: `ConstraintError`, `QuotaExceededError`, `AbortError`, IndexedDB-unavailable, plus kidx's
+   own hydrate-time (absent / null / wrong type — decision 9), query-build-time and
+   schema-verification failures. The message quality Kormium achieves (name the store, the field, the
+   expected type, and what to do) is a feature, not a nicety — budget for it.
+6. **No code has been written.** Everything under "The DSL" is a sketch for shape and ergonomics, not
    verified to compile.
 
-## Wiring this into stramus, later
+## Conventions to adopt from day one
 
-stramus already has the composite-build pattern for exactly this situation — see stramus's
-`README.md`, "Kormium from a sibling checkout": if `../korm` sits next to the stramus checkout, it's
-picked up live via composite build; otherwise the published Maven artifact is used. The same mechanism
-should be extended (or mirrored) for kidx once it has something to consume — check
-`stramus/settings.gradle.kts` for the existing conditional-composite-build logic before wiring a
-second one in.
+Cheap now, expensive to retrofit — and they are how the author's other libraries are consumed:
+
+- `explicitApi()` on every published module, with the public ABI dumped per module in `<module>/api/`
+  and checked by CI; `./gradlew apiDump` output is the review artifact for any deliberate API change.
+- An `AGENTS.md` in the copy-ready style of Kormium's: mental model first, then the canonical form
+  for each task, a "which form for what" table, recipes, and a gotchas list. For kidx the gotchas
+  list should include the engine-call table from decision 7 (which call each read becomes is the
+  thing users most need and least can guess), the key-ordering rules from decision 11, and the
+  all-or-nothing abort semantics from decision 6. Plus `docs/` with ADRs, `CHANGELOG.md`, `llms.txt`.
+- The house comment style: every non-obvious decision carries its "why" inline, next to the code that
+  depends on it — including the measurements behind performance choices.
