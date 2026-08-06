@@ -7,6 +7,10 @@ SPEC.md's Roadmap and open questions).
 
 ## Unreleased
 
+Not published. Cutting `0.1.0` is a one-line version change plus Central credentials, and it is a
+deliberate wait rather than an oversight: index arity is a known breaking change that should land first,
+so publishing now would be a promise to break the API immediately.
+
 The first version. Nothing is published yet, so everything here is "added".
 
 ### The v1 surface

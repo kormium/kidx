@@ -30,7 +30,11 @@ jobs:
 
       # The same engine suite against a real IndexedDB. This is the only run that is evidence about a
       # browser rather than about kidx — fake-indexeddb has its own bugs (SPEC.md, "Testing").
+      # `CHROME_BIN` is how Karma finds a browser. The runner image ships Chrome; on an image that does
+      # not, the build falls back to the Chromium puppeteer downloads during the npm install.
       - name: Test in a browser
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
         run: ./gradlew jsBrowserTest wasmJsBrowserTest -PenableBrowserTests=true
 
       # The public ABI is the review artifact: a deliberate API change means committing an apiDump diff.

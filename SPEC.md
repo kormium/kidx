@@ -306,10 +306,16 @@ under `autoContinue = true`, which is why kidx's scope-scoped `collect` takes a 
 > currently what it is upstream: a documented rule, plus the driver detecting the symptom, plus kidx's
 > own `collect` keeping the one legitimate suspending consumer in reach.
 >
-> Two ways out, neither tried: invoke the block outside the driver lambda (which means reimplementing
-> the transaction plumbing kidx vendored the driver *for* — likely a bad trade), or a coroutine-context
-> marker checked at runtime, which catches a nested `db.write` but not a stray `delay`. Until one is
-> chosen, this is the largest gap between what the design promises and what it enforces.
+> **The runtime marker is what shipped.** Of the two ways out — invoke the block outside the driver
+> lambda, which means reimplementing the transaction plumbing kidx vendored the driver *for*, or a
+> coroutine-context marker checked at runtime — the second is in `Database.refuseNesting`. It catches the
+> failure mode that is otherwise indistinguishable from a hang: a `db.read`/`db.write` opened inside
+> another one, which deadlocks as soon as the store sets overlap.
+>
+> What it does not catch is a stray `delay` or a network call inside a scope, which lets the event loop
+> drain and the transaction auto-commit. That gap is real and documented in `AGENTS.md`; closing it needs
+> the first option, and rewriting the transaction plumbing to gain a compile-time check over a documented
+> rule is not a trade worth making today.
 
 ### 6. Failure: the whole transaction, no savepoints, no nesting
 
@@ -1143,9 +1149,16 @@ from zero:
   building). Runs on js and wasmJs, so both targets' interop is exercised.
 - `src/jsTest` — everything that needs an engine, on `fake-indexeddb` under Node. js-only, because the
   npm dependency and `require` are; the wasmJs side of the same behaviour needs a browser.
-- Browser tests are declared but not written. Anything genuinely engine-specific — real abort
-  behaviour, real key ordering, quota — is only trustworthy there, and `fake-indexeddb` passing is not
-  evidence about a browser.
+- Browser runs execute that same shared suite against a real engine: `./gradlew jsBrowserTest
+  wasmJsBrowserTest -PenableBrowserTests=true`, with `CHROME_BIN` pointing at a browser. They are gated
+  behind the flag because Karma fails outright without one and would take `check` down with it; CI passes
+  the flag. The build also falls back to the Chromium that `puppeteer` downloads, so a machine with no
+  browser can still run them.
+
+The browser run has already earned its place twice. It caught a flaky 2-second mocha timeout that a real
+engine overruns and `fake-indexeddb` never does (the timeout is now 30s), and it forced the wasm Node
+version to be pinned — the default is newer than the js target's and links against `libatomic`, which
+slim Linux images lack, surfacing as an opaque exit 127 during `yarn`.
 
 Two things worth knowing before writing more tests. An async `@BeforeTest` **does not work**: the
 kotlin-test JS runner awaits the promise a `@Test` returns but not one from a fixture method, so a
@@ -1223,23 +1236,17 @@ costs, because the reason for cutting it is not that it is worthless.
 
 ## Open questions for whoever continues this
 
-Seven earlier questions are answered and folded into the text above: **module layout** (one project —
+Nine earlier questions are answered and folded into the text above: **module layout** (one project —
 see "Architecture"), **Kotlin/Wasm** (both targets compile and the no-database tests run on both),
 **`@RestrictsSuspension`** (it does not work here — the implementation note under decision 5),
 **test strategy** (both runners, split by what each can cover — see "Testing"), the **shape of the
 DSL**, which is no longer a sketch, **the vendored API's visibility** (internal — decision 4), and the
 **error hierarchy** (`KidxException` with a typed failure per kidx-side cause, plus an `EngineException`
-family for what the engine reports).
+family for what the engine reports), **the suspend discipline** (a runtime marker — decision 5's note),
+and **browser tests**, which now run: the same engine suite against a real Chromium on js and on wasmJs,
+99 tests each, alongside the Node run on `fake-indexeddb`.
 
-1. **How is the suspend discipline enforced?** The one real gap between what this document promises and
-   what the code enforces. See decision 5's implementation note: either the transaction plumbing gets
-   restructured so the user's block is not invoked from inside the driver's lambda, or a
-   coroutine-context marker is checked at runtime — which catches a nested `db.write` but not a stray
-   `delay`. Left open deliberately; the wrong answer is expensive.
-2. **Browser tests.** Declared and unwritten. Everything genuinely engine-specific — real abort
-   behaviour, real key ordering, quota — is only trustworthy there, and `fake-indexeddb` passing is not
-   evidence about a browser. This is now the largest untested area.
-3. **Releasing.** The build publishes (`io.github.kidx:kidx`, verified against Maven local), signs when a
+1. **Releasing.** The build publishes (`io.github.kidx:kidx`, verified against Maven local), signs when a
    key is present, and CI checks both targets, both test runners and the ABI — but nothing has been
    released. What is missing is the decision of *when*: two breaking changes are wanted before `1.0`
    (index arity, and whatever enforces the suspend discipline), so a `0.1.0` published now is a promise

@@ -26,13 +26,30 @@ kotlin {
         // Node), and IndexedDB itself comes from `fake-indexeddb`. Browser tests are the only place
         // the real engine can be exercised, so they exist too — gated on a browser being installed,
         // the way kormium gates its iOS-simulator tests.
-        nodejs()
-        browser()
+        nodejs {
+            testTask { useMocha { timeout = "30s" } }
+        }
+        browser {
+            testTask {
+                // No sandbox: the usual state of a container or WSL, where Chromium's sandbox cannot
+                // start. The browser only loads a local test bundle here.
+                useKarma { useChromeHeadlessNoSandbox() }
+                useMocha { timeout = "30s" }
+            }
+        }
     }
 
     @Suppress("OPT_IN_USAGE")
     wasmJs {
-        browser()
+        browser {
+            testTask {
+                useKarma { useChromeHeadlessNoSandbox() }
+                // A real engine is slower than fake-indexeddb: opening and deleting a database per test
+                // overruns mocha's 2s default, which showed up as one flaky timeout rather than an
+                // honest failure.
+                useMocha { timeout = "30s" }
+            }
+        }
     }
 
     sourceSets {
@@ -63,6 +80,9 @@ kotlin {
         // runs on both targets.
         jsTest.dependencies {
             implementation(npm("fake-indexeddb", "^6.0.0"))
+            // Karma needs a browser binary and CI images rarely have one. puppeteer downloads a pinned
+            // Chromium in its postinstall — which is why install scripts are re-enabled below.
+            implementation(devNpm("puppeteer", "^23.11.1"))
         }
     }
 }
@@ -70,10 +90,46 @@ kotlin {
 // Browser tests are the only place the real engine can be exercised (SPEC.md, "Testing"), but they need
 // a browser binary that most machines and the default CI image do not have — without one Karma fails and
 // takes `check` with it. Off unless asked for; the CI workflow that installs a browser passes the flag.
+// Kotlin's yarn install runs with --ignore-scripts, which stops puppeteer from fetching its Chromium.
+//
+// SUPPLY-CHAIN NOTE: this re-enables arbitrary postinstall scripts for every js dependency, so a
+// compromised (transitive) package could run code at install time. The exposure is bounded — versions are
+// pinned and the resolved tree is committed in kotlin-js-store/yarn.lock, so installs are reproducible and
+// auditable — but review lockfile changes when bumping a test dependency.
+// The wasm target defaults to a newer Node than the js one, and that build links against libatomic —
+// absent from plenty of slim Linux images, where it fails as an opaque exit 127 during `yarn`. Pin both
+// to the version the js target already downloads.
+plugins.withType(org.jetbrains.kotlin.gradle.targets.wasm.nodejs.WasmNodeJsRootPlugin::class.java) {
+    the<org.jetbrains.kotlin.gradle.targets.wasm.nodejs.WasmNodeJsEnvSpec>().version.set("24.10.0")
+}
+
+plugins.withType(org.jetbrains.kotlin.gradle.targets.js.yarn.YarnPlugin::class.java) {
+    the<org.jetbrains.kotlin.gradle.targets.js.yarn.YarnRootEnvSpec>().ignoreScripts.set(false)
+}
+
 val browserTestsEnabled = providers.gradleProperty("enableBrowserTests").orNull.toBoolean()
 
+/**
+ * Karma finds a browser through `CHROME_BIN`. Prefer whatever the environment already has; otherwise use
+ * the Chromium puppeteer downloaded, so a machine (or CI image) with no browser can still run these.
+ */
+val chromeBinary: String? = System.getenv("CHROME_BIN")
+    ?: providers.gradleProperty("chromeBin").orNull
+    ?: file("${System.getProperty("user.home")}/.cache/puppeteer/chrome")
+        .listFiles()
+        ?.sortedBy { it.name }
+        ?.lastOrNull()
+        ?.let { version -> File(version, "chrome-linux64/chrome").takeIf { it.canExecute() }?.absolutePath }
+
 tasks.matching { it.name in setOf("jsBrowserTest", "wasmJsBrowserTest") }.configureEach {
-    onlyIf("browser tests need -PenableBrowserTests=true and an installed browser") { browserTestsEnabled }
+    onlyIf("browser tests need -PenableBrowserTests=true and a browser binary") {
+        browserTestsEnabled && chromeBinary != null
+    }
+}
+
+// Reported once, because "browser tests silently did not run" is the failure mode this whole gate risks.
+if (browserTestsEnabled && chromeBinary == null) {
+    logger.warn("Browser tests were requested but no browser was found: set CHROME_BIN or -PchromeBin.")
 }
 
 mavenPublishing {

@@ -217,8 +217,11 @@ if (!user.isSet(Users.note)) { /* this record predates `note` */ }
 - `./gradlew compileKotlinJs compileKotlinWasmJs` — both targets must compile. Wasm is stricter: a
   `js(...)` call must be a whole top-level function body, and an interface extending `JsAny` must be
   `external`.
-- `./gradlew jsNodeTest` — the suite. `src/webTest` needs no database and runs on both targets;
-  `src/jsTest` is engine-level, on `fake-indexeddb` under Node.
+- `./gradlew jsNodeTest` — the suite under Node, with `fake-indexeddb` standing in for the engine.
+- `CHROME_BIN=... ./gradlew jsBrowserTest wasmJsBrowserTest -PenableBrowserTests=true` — the same suite
+  against a real engine, on both targets. Run it before trusting anything engine-specific; the Node run
+  is evidence about kidx, not about a browser. Everything lives in `src/webTest`; the per-target
+  `IndexedDbHost` actual is the only split.
 - An async `@BeforeTest` **does not run** under the kotlin-test JS runner. Open the database inside the
   test.
 - `./gradlew apiDump` after any deliberate public-API change; the `.api` diff is the review artifact.
