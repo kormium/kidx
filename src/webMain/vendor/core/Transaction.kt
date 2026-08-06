@@ -17,7 +17,7 @@ import kotlin.js.JsAny
 import kotlin.js.JsArray
 import kotlin.js.toInt
 
-public open class Transaction internal constructor(
+internal open class Transaction internal constructor(
     internal val transaction: IDBTransaction,
     internal val logger: Logger,
     internal val transactionId: Long,
@@ -237,7 +237,7 @@ public open class Transaction internal constructor(
         Index(objectStore.index(name))
 }
 
-public open class WriteTransaction internal constructor(
+internal open class WriteTransaction internal constructor(
     transaction: IDBTransaction,
     logger: Logger,
     transactionId: Long,
@@ -321,7 +321,7 @@ public open class WriteTransaction internal constructor(
     }
 }
 
-public class VersionChangeTransaction internal constructor(
+internal class VersionChangeTransaction internal constructor(
     transaction: IDBTransaction,
     logger: Logger,
     transactionId: Long,

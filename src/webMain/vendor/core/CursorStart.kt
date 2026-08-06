@@ -2,7 +2,7 @@ package com.juul.indexeddb
 
 import com.juul.indexeddb.external.IDBCursor
 
-public sealed class CursorStart {
+internal sealed class CursorStart {
 
     internal abstract fun apply(cursor: IDBCursor)
 

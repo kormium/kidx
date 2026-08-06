@@ -74,3 +74,10 @@ internal fun closeBroadcast(channel: JsAny) {
 internal fun onBroadcast(channel: JsAny, handler: (String) -> Unit) {
     js("channel.onmessage = (event) => handler(String(event.data))")
 }
+
+/**
+ * The `DOMException.name` behind an error event — `ConstraintError`, `QuotaExceededError`, and so on.
+ * It hangs off the failing request rather than the event, and is absent on a transaction-level abort.
+ */
+internal fun jsErrorName(event: JsAny): String =
+    js("(event.target && event.target.error && event.target.error.name) || (event.error && event.error.name) || ''")

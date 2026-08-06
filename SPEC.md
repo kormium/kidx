@@ -243,7 +243,10 @@ through is "probably wrong". **That gap is what kidx fills**: JuulLabs gives saf
 raw storage, kidx gives typed schema, typed rows, typed queries and migrations on top.
 
 **Decision: vendor the `core` module into kidx** rather than depend on it, for full control over the
-code kidx's own guarantees rest on and zero third-party surface for consumers. The honest cost,
+code kidx's own guarantees rest on and zero third-party surface for consumers — which is literal: the
+vendored top-level declarations are `internal`, so `com.juul.indexeddb` appears nowhere in kidx's ABI
+dump. That in turn forced engine failures to be translated into kidx's own exception types, since a
+consumer must be able to catch a duplicate key without naming a vendored class. The honest cost,
 recorded so nobody rediscovers it: upstream fixes — including fixes to the transaction-lifetime
 discipline, the riskiest part — must be ported by hand, and Apache-2.0 attribution obligations (a
 `NOTICE` file, retained license headers, a clear statement of what was modified) are now kidx's to
@@ -1220,34 +1223,29 @@ costs, because the reason for cutting it is not that it is worthless.
 
 ## Open questions for whoever continues this
 
-Five earlier questions are answered and folded into the text above: **module layout** (one project — see
-"Architecture"), **Kotlin/Wasm** (both targets compile and the no-database tests run on both),
+Seven earlier questions are answered and folded into the text above: **module layout** (one project —
+see "Architecture"), **Kotlin/Wasm** (both targets compile and the no-database tests run on both),
 **`@RestrictsSuspension`** (it does not work here — the implementation note under decision 5),
-**test strategy** (both runners, split by what each can cover — see "Testing"), and the **shape of the
-DSL**, which is no longer a sketch: everything under "The DSL" compiles and is exercised.
+**test strategy** (both runners, split by what each can cover — see "Testing"), the **shape of the
+DSL**, which is no longer a sketch, **the vendored API's visibility** (internal — decision 4), and the
+**error hierarchy** (`KidxException` with a typed failure per kidx-side cause, plus an `EngineException`
+family for what the engine reports).
 
 1. **How is the suspend discipline enforced?** The one real gap between what this document promises and
    what the code enforces. See decision 5's implementation note: either the transaction plumbing gets
    restructured so the user's block is not invoked from inside the driver's lambda, or a
    coroutine-context marker is checked at runtime — which catches a nested `db.write` but not a stray
    `delay`. Left open deliberately; the wrong answer is expensive.
-2. **Does the vendored API stay public?** The vendored sources are `public` and, in one module under
-   `explicitApi()`, they land in kidx's own ABI dump — so `com.juul.indexeddb` becomes part of kidx's
-   published surface, which undercuts the "zero third-party surface for consumers" half of decision 4.
-   The fix is a mechanical `public` → `internal` pass over `vendor/`, which stays re-appliable after each
-   upstream port precisely because it is mechanical.
-3. **Browser tests.** Declared and unwritten. Everything genuinely engine-specific — real abort
+2. **Browser tests.** Declared and unwritten. Everything genuinely engine-specific — real abort
    behaviour, real key ordering, quota — is only trustworthy there, and `fake-indexeddb` passing is not
-   evidence about a browser.
-4. **Publishing.** The coordinate is `io.github.kidx:kidx`; a `kidx-bom` (as Kormium has) only becomes
-   meaningful if there is ever more than one artifact, and with notification built in there is currently
-   nothing that wants to be one. The publish plugin is not wired up.
-5. **Error hierarchy.** What exists: `KidxException` with `SchemaException`, `SchemaMismatchException`,
-   `RowMappingException`, `QueryException`, `FieldTypeException`, `DatabaseBlockedException`,
-   `DatabaseClosedException`, `IndexedDbUnavailableException`. What does not: the engine's own failures
-   still surface as the driver's `ErrorEventException` — a `ConstraintError` (duplicate key, unique-index
-   violation) and a `QuotaExceededError` are worth telling apart by type, since an application handles
-   them differently.
+   evidence about a browser. This is now the largest untested area.
+3. **Publishing a release.** The build publishes (`io.github.kidx:kidx`, verified against Maven local)
+   and signs when a key is present, but nothing has been released: no version policy, no CI workflow, no
+   `CHANGELOG.md`.
+4. **Which engine failures deserve their own type.** `ConstraintViolationException` and
+   `QuotaExceededException` exist; everything else arrives as `EngineException` carrying the
+   `DOMException.name`. `AbortError`, `VersionError` and `DataError` are the candidates — each only
+   worth splitting out if an application would genuinely handle it differently.
 
 ## Conventions to adopt from day one
 

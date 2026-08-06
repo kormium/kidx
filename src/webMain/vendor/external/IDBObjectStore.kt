@@ -4,7 +4,7 @@ import kotlin.js.JsArray
 import kotlin.js.JsString
 
 /** https://developer.mozilla.org/en-US/docs/Web/API/IDBObjectStore */
-public external interface IDBObjectStore : IDBQueryable {
+internal external interface IDBObjectStore : IDBQueryable {
     public val name: String
 
     // kidx modification (see VENDOR.md): the introspection properties the platform already has, needed

@@ -1,0 +1,476 @@
+// Klib ABI Dump
+// Targets: [js, wasmJs]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <io.github.kidx:kidx>
+final enum class io.github.kidx/Direction : kotlin/Enum<io.github.kidx/Direction> { // io.github.kidx/Direction|null[0]
+    enum entry ASC // io.github.kidx/Direction.ASC|null[0]
+    enum entry DESC // io.github.kidx/Direction.DESC|null[0]
+
+    final val entries // io.github.kidx/Direction.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kidx/Direction> // io.github.kidx/Direction.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.kidx/Direction // io.github.kidx/Direction.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kidx/Direction> // io.github.kidx/Direction.values|values#static(){}[0]
+}
+
+abstract fun interface io.github.kidx/Registration { // io.github.kidx/Registration|null[0]
+    abstract fun remove() // io.github.kidx/Registration.remove|remove(){}[0]
+}
+
+abstract fun interface io.github.kidx/WriteListener { // io.github.kidx/WriteListener|null[0]
+    abstract fun onCommit(kotlin.collections/Set<kotlin/String>) // io.github.kidx/WriteListener.onCommit|onCommit(kotlin.collections.Set<kotlin.String>){}[0]
+}
+
+abstract interface <#A: kotlin/Any?> io.github.kidx/FieldType { // io.github.kidx/FieldType|null[0]
+    abstract val description // io.github.kidx/FieldType.description|{}description[0]
+        abstract fun <get-description>(): kotlin/String // io.github.kidx/FieldType.description.<get-description>|<get-description>(){}[0]
+
+    // Targets: [js]
+    abstract fun decode(kotlin/Any): #A // io.github.kidx/FieldType.decode|decode(kotlin.Any){}[0]
+
+    // Targets: [js]
+    abstract fun encode(#A): kotlin/Any // io.github.kidx/FieldType.encode|encode(1:0){}[0]
+
+    // Targets: [wasmJs]
+    abstract fun decode(kotlin.js/JsAny): #A // io.github.kidx/FieldType.decode|decode(kotlin.js.JsAny){}[0]
+
+    // Targets: [wasmJs]
+    abstract fun encode(#A): kotlin.js/JsAny // io.github.kidx/FieldType.encode|encode(1:0){}[0]
+}
+
+abstract interface <#A: kotlin/Any?> io.github.kidx/KeyFieldType : io.github.kidx/FieldType<#A> // io.github.kidx/KeyFieldType|null[0]
+
+abstract interface io.github.kidx/NotificationTransport { // io.github.kidx/NotificationTransport|null[0]
+    abstract fun subscribe(): kotlinx.coroutines.flow/Flow<kotlin.collections/Set<kotlin/String>> // io.github.kidx/NotificationTransport.subscribe|subscribe(){}[0]
+    abstract suspend fun publish(kotlin.collections/Set<kotlin/String>) // io.github.kidx/NotificationTransport.publish|publish(kotlin.collections.Set<kotlin.String>){}[0]
+}
+
+sealed interface io.github.kidx/SchemaStep { // io.github.kidx/SchemaStep|null[0]
+    final class <#A1: io.github.kidx/Row> AddIndex : io.github.kidx/SchemaStep { // io.github.kidx/SchemaStep.AddIndex|null[0]
+        constructor <init>(io.github.kidx/Store<#A1>, io.github.kidx/Index<#A1>) // io.github.kidx/SchemaStep.AddIndex.<init>|<init>(io.github.kidx.Store<1:0>;io.github.kidx.Index<1:0>){}[0]
+
+        final val index // io.github.kidx/SchemaStep.AddIndex.index|{}index[0]
+            final fun <get-index>(): io.github.kidx/Index<#A1> // io.github.kidx/SchemaStep.AddIndex.index.<get-index>|<get-index>(){}[0]
+        final val store // io.github.kidx/SchemaStep.AddIndex.store|{}store[0]
+            final fun <get-store>(): io.github.kidx/Store<#A1> // io.github.kidx/SchemaStep.AddIndex.store.<get-store>|<get-store>(){}[0]
+    }
+
+    final class <#A1: io.github.kidx/Row> CreateStore : io.github.kidx/SchemaStep { // io.github.kidx/SchemaStep.CreateStore|null[0]
+        constructor <init>(io.github.kidx/Store<#A1>) // io.github.kidx/SchemaStep.CreateStore.<init>|<init>(io.github.kidx.Store<1:0>){}[0]
+
+        final val store // io.github.kidx/SchemaStep.CreateStore.store|{}store[0]
+            final fun <get-store>(): io.github.kidx/Store<#A1> // io.github.kidx/SchemaStep.CreateStore.store.<get-store>|<get-store>(){}[0]
+    }
+
+    final class DropIndex : io.github.kidx/SchemaStep { // io.github.kidx/SchemaStep.DropIndex|null[0]
+        constructor <init>(kotlin/String, kotlin/String) // io.github.kidx/SchemaStep.DropIndex.<init>|<init>(kotlin.String;kotlin.String){}[0]
+
+        final val indexName // io.github.kidx/SchemaStep.DropIndex.indexName|{}indexName[0]
+            final fun <get-indexName>(): kotlin/String // io.github.kidx/SchemaStep.DropIndex.indexName.<get-indexName>|<get-indexName>(){}[0]
+        final val storeName // io.github.kidx/SchemaStep.DropIndex.storeName|{}storeName[0]
+            final fun <get-storeName>(): kotlin/String // io.github.kidx/SchemaStep.DropIndex.storeName.<get-storeName>|<get-storeName>(){}[0]
+    }
+
+    final class DropStore : io.github.kidx/SchemaStep { // io.github.kidx/SchemaStep.DropStore|null[0]
+        constructor <init>(kotlin/String) // io.github.kidx/SchemaStep.DropStore.<init>|<init>(kotlin.String){}[0]
+
+        final val storeName // io.github.kidx/SchemaStep.DropStore.storeName|{}storeName[0]
+            final fun <get-storeName>(): kotlin/String // io.github.kidx/SchemaStep.DropStore.storeName.<get-storeName>|<get-storeName>(){}[0]
+    }
+}
+
+abstract class <#A: io.github.kidx/Row> io.github.kidx/Store { // io.github.kidx/Store|null[0]
+    constructor <init>(kotlin/String, kotlin/Function0<#A>) // io.github.kidx/Store.<init>|<init>(kotlin.String;kotlin.Function0<1:0>){}[0]
+
+    final val autoIncrement // io.github.kidx/Store.autoIncrement|{}autoIncrement[0]
+        final fun <get-autoIncrement>(): kotlin/Boolean // io.github.kidx/Store.autoIncrement.<get-autoIncrement>|<get-autoIncrement>(){}[0]
+    final val declaredFields // io.github.kidx/Store.declaredFields|{}declaredFields[0]
+        final fun <get-declaredFields>(): kotlin.collections/List<io.github.kidx/Field<*, *, #A>> // io.github.kidx/Store.declaredFields.<get-declaredFields>|<get-declaredFields>(){}[0]
+    final val declaredIndexes // io.github.kidx/Store.declaredIndexes|{}declaredIndexes[0]
+        final fun <get-declaredIndexes>(): kotlin.collections/List<io.github.kidx/Index<#A>> // io.github.kidx/Store.declaredIndexes.<get-declaredIndexes>|<get-declaredIndexes>(){}[0]
+    final val primaryKey // io.github.kidx/Store.primaryKey|{}primaryKey[0]
+        final fun <get-primaryKey>(): kotlin.collections/List<io.github.kidx/Field.KeyField<*, *, #A>> // io.github.kidx/Store.primaryKey.<get-primaryKey>|<get-primaryKey>(){}[0]
+    final val storeName // io.github.kidx/Store.storeName|{}storeName[0]
+        final fun <get-storeName>(): kotlin/String // io.github.kidx/Store.storeName.<get-storeName>|<get-storeName>(){}[0]
+}
+
+abstract class io.github.kidx/Row { // io.github.kidx/Row|null[0]
+    constructor <init>() // io.github.kidx/Row.<init>|<init>(){}[0]
+}
+
+final class <#A: io.github.kidx/Row> io.github.kidx/Index { // io.github.kidx/Index|null[0]
+    final val fields // io.github.kidx/Index.fields|{}fields[0]
+        final fun <get-fields>(): kotlin.collections/List<io.github.kidx/Field.KeyField<*, *, #A>> // io.github.kidx/Index.fields.<get-fields>|<get-fields>(){}[0]
+    final val indexName // io.github.kidx/Index.indexName|{}indexName[0]
+        final fun <get-indexName>(): kotlin/String // io.github.kidx/Index.indexName.<get-indexName>|<get-indexName>(){}[0]
+    final val store // io.github.kidx/Index.store|{}store[0]
+        final fun <get-store>(): io.github.kidx/Store<#A> // io.github.kidx/Index.store.<get-store>|<get-store>(){}[0]
+    final val unique // io.github.kidx/Index.unique|{}unique[0]
+        final fun <get-unique>(): kotlin/Boolean // io.github.kidx/Index.unique.<get-unique>|<get-unique>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.kidx/Index.toString|toString(){}[0]
+}
+
+final class <#A: io.github.kidx/Row> io.github.kidx/QueryBuilder { // io.github.kidx/QueryBuilder|null[0]
+    final var direction // io.github.kidx/QueryBuilder.direction|{}direction[0]
+        final fun <get-direction>(): io.github.kidx/Direction // io.github.kidx/QueryBuilder.direction.<get-direction>|<get-direction>(){}[0]
+        final fun <set-direction>(io.github.kidx/Direction) // io.github.kidx/QueryBuilder.direction.<set-direction>|<set-direction>(io.github.kidx.Direction){}[0]
+    final var limit // io.github.kidx/QueryBuilder.limit|{}limit[0]
+        final fun <get-limit>(): kotlin/Int? // io.github.kidx/QueryBuilder.limit.<get-limit>|<get-limit>(){}[0]
+        final fun <set-limit>(kotlin/Int?) // io.github.kidx/QueryBuilder.limit.<set-limit>|<set-limit>(kotlin.Int?){}[0]
+
+    final fun <#A1: kotlin/Any?> (io.github.kidx/Field.KeyField<#A1, *, #A>).eq(#A1) // io.github.kidx/QueryBuilder.eq|eq@io.github.kidx.Field.KeyField<0:0,*,1:0>(0:0){0§<kotlin.Any?>}[0]
+    final fun <#A1: kotlin/Comparable<#A1>> (io.github.kidx/Field.KeyField<#A1, *, #A>).between(kotlin.ranges/ClosedRange<#A1>) // io.github.kidx/QueryBuilder.between|between@io.github.kidx.Field.KeyField<0:0,*,1:0>(kotlin.ranges.ClosedRange<0:0>){0§<kotlin.Comparable<0:0>>}[0]
+    final fun <#A1: kotlin/Comparable<#A1>> (io.github.kidx/Field.KeyField<#A1, *, #A>).gt(#A1) // io.github.kidx/QueryBuilder.gt|gt@io.github.kidx.Field.KeyField<0:0,*,1:0>(0:0){0§<kotlin.Comparable<0:0>>}[0]
+    final fun <#A1: kotlin/Comparable<#A1>> (io.github.kidx/Field.KeyField<#A1, *, #A>).gtEq(#A1) // io.github.kidx/QueryBuilder.gtEq|gtEq@io.github.kidx.Field.KeyField<0:0,*,1:0>(0:0){0§<kotlin.Comparable<0:0>>}[0]
+    final fun <#A1: kotlin/Comparable<#A1>> (io.github.kidx/Field.KeyField<#A1, *, #A>).lt(#A1) // io.github.kidx/QueryBuilder.lt|lt@io.github.kidx.Field.KeyField<0:0,*,1:0>(0:0){0§<kotlin.Comparable<0:0>>}[0]
+    final fun <#A1: kotlin/Comparable<#A1>> (io.github.kidx/Field.KeyField<#A1, *, #A>).ltEq(#A1) // io.github.kidx/QueryBuilder.ltEq|ltEq@io.github.kidx.Field.KeyField<0:0,*,1:0>(0:0){0§<kotlin.Comparable<0:0>>}[0]
+}
+
+final class io.github.kidx/BroadcastChannelTransport : io.github.kidx/NotificationTransport { // io.github.kidx/BroadcastChannelTransport|null[0]
+    constructor <init>(kotlin/String) // io.github.kidx/BroadcastChannelTransport.<init>|<init>(kotlin.String){}[0]
+
+    final fun subscribe(): kotlinx.coroutines.flow/Flow<kotlin.collections/Set<kotlin/String>> // io.github.kidx/BroadcastChannelTransport.subscribe|subscribe(){}[0]
+    final suspend fun publish(kotlin.collections/Set<kotlin/String>) // io.github.kidx/BroadcastChannelTransport.publish|publish(kotlin.collections.Set<kotlin.String>){}[0]
+}
+
+final class io.github.kidx/ConstraintViolationException : io.github.kidx/EngineException // io.github.kidx/ConstraintViolationException|null[0]
+
+final class io.github.kidx/Database { // io.github.kidx/Database|null[0]
+    final val isOpen // io.github.kidx/Database.isOpen|{}isOpen[0]
+        final fun <get-isOpen>(): kotlin/Boolean // io.github.kidx/Database.isOpen.<get-isOpen>|<get-isOpen>(){}[0]
+    final val version // io.github.kidx/Database.version|{}version[0]
+        final fun <get-version>(): kotlin/Int // io.github.kidx/Database.version.<get-version>|<get-version>(){}[0]
+    final val writeListeners // io.github.kidx/Database.writeListeners|{}writeListeners[0]
+        final fun <get-writeListeners>(): io.github.kidx/WriteListeners // io.github.kidx/Database.writeListeners.<get-writeListeners>|<get-writeListeners>(){}[0]
+
+    final fun close() // io.github.kidx/Database.close|close(){}[0]
+    final suspend fun <#A1: kotlin/Any?> read(kotlin/Array<out io.github.kidx/Store<*>>..., kotlin.coroutines/SuspendFunction1<io.github.kidx/ReadScope, #A1>): #A1 // io.github.kidx/Database.read|read(kotlin.Array<out|io.github.kidx.Store<*>>...;kotlin.coroutines.SuspendFunction1<io.github.kidx.ReadScope,0:0>){0§<kotlin.Any?>}[0]
+    final suspend fun <#A1: kotlin/Any?> write(kotlin/Array<out io.github.kidx/Store<*>>..., kotlin.coroutines/SuspendFunction1<io.github.kidx/WriteScope, #A1>): #A1 // io.github.kidx/Database.write|write(kotlin.Array<out|io.github.kidx.Store<*>>...;kotlin.coroutines.SuspendFunction1<io.github.kidx.WriteScope,0:0>){0§<kotlin.Any?>}[0]
+}
+
+final class io.github.kidx/DatabaseBlockedException : io.github.kidx/KidxException { // io.github.kidx/DatabaseBlockedException|null[0]
+    final val databaseName // io.github.kidx/DatabaseBlockedException.databaseName|{}databaseName[0]
+        final fun <get-databaseName>(): kotlin/String // io.github.kidx/DatabaseBlockedException.databaseName.<get-databaseName>|<get-databaseName>(){}[0]
+}
+
+final class io.github.kidx/DatabaseClosedException : io.github.kidx/KidxException // io.github.kidx/DatabaseClosedException|null[0]
+
+final class io.github.kidx/FieldTypeException : io.github.kidx/KidxException { // io.github.kidx/FieldTypeException|null[0]
+    constructor <init>(kotlin/String) // io.github.kidx/FieldTypeException.<init>|<init>(kotlin.String){}[0]
+}
+
+final class io.github.kidx/IndexedDbUnavailableException : io.github.kidx/KidxException // io.github.kidx/IndexedDbUnavailableException|null[0]
+
+final class io.github.kidx/Migration { // io.github.kidx/Migration|null[0]
+    constructor <init>(kotlin/Int, kotlin.collections/List<io.github.kidx/SchemaStep>) // io.github.kidx/Migration.<init>|<init>(kotlin.Int;kotlin.collections.List<io.github.kidx.SchemaStep>){}[0]
+
+    final val steps // io.github.kidx/Migration.steps|{}steps[0]
+        final fun <get-steps>(): kotlin.collections/List<io.github.kidx/SchemaStep> // io.github.kidx/Migration.steps.<get-steps>|<get-steps>(){}[0]
+    final val version // io.github.kidx/Migration.version|{}version[0]
+        final fun <get-version>(): kotlin/Int // io.github.kidx/Migration.version.<get-version>|<get-version>(){}[0]
+}
+
+final class io.github.kidx/QueryDescription { // io.github.kidx/QueryDescription|null[0]
+    final val direction // io.github.kidx/QueryDescription.direction|{}direction[0]
+        final fun <get-direction>(): io.github.kidx/Direction // io.github.kidx/QueryDescription.direction.<get-direction>|<get-direction>(){}[0]
+    final val indexName // io.github.kidx/QueryDescription.indexName|{}indexName[0]
+        final fun <get-indexName>(): kotlin/String // io.github.kidx/QueryDescription.indexName.<get-indexName>|<get-indexName>(){}[0]
+    final val limit // io.github.kidx/QueryDescription.limit|{}limit[0]
+        final fun <get-limit>(): kotlin/Int? // io.github.kidx/QueryDescription.limit.<get-limit>|<get-limit>(){}[0]
+    final val lower // io.github.kidx/QueryDescription.lower|{}lower[0]
+        final fun <get-lower>(): kotlin.collections/List<kotlin/Any?>? // io.github.kidx/QueryDescription.lower.<get-lower>|<get-lower>(){}[0]
+    final val lowerOpen // io.github.kidx/QueryDescription.lowerOpen|{}lowerOpen[0]
+        final fun <get-lowerOpen>(): kotlin/Boolean // io.github.kidx/QueryDescription.lowerOpen.<get-lowerOpen>|<get-lowerOpen>(){}[0]
+    final val upper // io.github.kidx/QueryDescription.upper|{}upper[0]
+        final fun <get-upper>(): kotlin.collections/List<kotlin/Any?>? // io.github.kidx/QueryDescription.upper.<get-upper>|<get-upper>(){}[0]
+    final val upperOpen // io.github.kidx/QueryDescription.upperOpen|{}upperOpen[0]
+        final fun <get-upperOpen>(): kotlin/Boolean // io.github.kidx/QueryDescription.upperOpen.<get-upperOpen>|<get-upperOpen>(){}[0]
+    final val upperUnboundedTail // io.github.kidx/QueryDescription.upperUnboundedTail|{}upperUnboundedTail[0]
+        final fun <get-upperUnboundedTail>(): kotlin/Boolean // io.github.kidx/QueryDescription.upperUnboundedTail.<get-upperUnboundedTail>|<get-upperUnboundedTail>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.kidx/QueryDescription.toString|toString(){}[0]
+}
+
+final class io.github.kidx/QueryException : io.github.kidx/KidxException // io.github.kidx/QueryException|null[0]
+
+final class io.github.kidx/QuotaExceededException : io.github.kidx/EngineException // io.github.kidx/QuotaExceededException|null[0]
+
+final class io.github.kidx/RowMappingException : io.github.kidx/KidxException // io.github.kidx/RowMappingException|null[0]
+
+final class io.github.kidx/Schema { // io.github.kidx/Schema|null[0]
+    constructor <init>(kotlin/String, kotlin.collections/List<io.github.kidx/Migration>) // io.github.kidx/Schema.<init>|<init>(kotlin.String;kotlin.collections.List<io.github.kidx.Migration>){}[0]
+
+    final val databaseName // io.github.kidx/Schema.databaseName|{}databaseName[0]
+        final fun <get-databaseName>(): kotlin/String // io.github.kidx/Schema.databaseName.<get-databaseName>|<get-databaseName>(){}[0]
+    final val migrations // io.github.kidx/Schema.migrations|{}migrations[0]
+        final fun <get-migrations>(): kotlin.collections/List<io.github.kidx/Migration> // io.github.kidx/Schema.migrations.<get-migrations>|<get-migrations>(){}[0]
+    final val storeNames // io.github.kidx/Schema.storeNames|{}storeNames[0]
+        final fun <get-storeNames>(): kotlin.collections/List<kotlin/String> // io.github.kidx/Schema.storeNames.<get-storeNames>|<get-storeNames>(){}[0]
+    final val version // io.github.kidx/Schema.version|{}version[0]
+        final fun <get-version>(): kotlin/Int // io.github.kidx/Schema.version.<get-version>|<get-version>(){}[0]
+}
+
+final class io.github.kidx/SchemaException : io.github.kidx/KidxException // io.github.kidx/SchemaException|null[0]
+
+final class io.github.kidx/SchemaMismatchException : io.github.kidx/KidxException // io.github.kidx/SchemaMismatchException|null[0]
+
+final class io.github.kidx/VersionChangeSignal { // io.github.kidx/VersionChangeSignal|null[0]
+    final val databaseName // io.github.kidx/VersionChangeSignal.databaseName|{}databaseName[0]
+        final fun <get-databaseName>(): kotlin/String // io.github.kidx/VersionChangeSignal.databaseName.<get-databaseName>|<get-databaseName>(){}[0]
+}
+
+final class io.github.kidx/WriteListeners { // io.github.kidx/WriteListeners|null[0]
+    final val isActive // io.github.kidx/WriteListeners.isActive|{}isActive[0]
+        final fun <get-isActive>(): kotlin/Boolean // io.github.kidx/WriteListeners.isActive.<get-isActive>|<get-isActive>(){}[0]
+
+    final fun add(io.github.kidx/WriteListener): io.github.kidx/Registration // io.github.kidx/WriteListeners.add|add(io.github.kidx.WriteListener){}[0]
+}
+
+final class io.github.kidx/WriteScope : io.github.kidx/ReadScope { // io.github.kidx/WriteScope|null[0]
+    final suspend fun <#A1: io.github.kidx/Row> (io.github.kidx/Store<#A1>).add(#A1): kotlin/Any // io.github.kidx/WriteScope.add|add@io.github.kidx.Store<0:0>(0:0){0§<io.github.kidx.Row>}[0]
+    final suspend fun <#A1: io.github.kidx/Row> (io.github.kidx/Store<#A1>).delete(kotlin/Any) // io.github.kidx/WriteScope.delete|delete@io.github.kidx.Store<0:0>(kotlin.Any){0§<io.github.kidx.Row>}[0]
+    final suspend fun <#A1: io.github.kidx/Row> (io.github.kidx/Store<#A1>).put(#A1): kotlin/Any // io.github.kidx/WriteScope.put|put@io.github.kidx.Store<0:0>(0:0){0§<io.github.kidx.Row>}[0]
+}
+
+open class io.github.kidx/EngineException : io.github.kidx/KidxException { // io.github.kidx/EngineException|null[0]
+    final val errorName // io.github.kidx/EngineException.errorName|{}errorName[0]
+        final fun <get-errorName>(): kotlin/String // io.github.kidx/EngineException.errorName.<get-errorName>|<get-errorName>(){}[0]
+}
+
+open class io.github.kidx/KidxException : kotlin/Exception // io.github.kidx/KidxException|null[0]
+
+open class io.github.kidx/ReadScope { // io.github.kidx/ReadScope|null[0]
+    final suspend fun <#A1: io.github.kidx/Row> (io.github.kidx/Store<#A1>).all(): kotlin.collections/List<#A1> // io.github.kidx/ReadScope.all|all@io.github.kidx.Store<0:0>(){0§<io.github.kidx.Row>}[0]
+    final suspend fun <#A1: io.github.kidx/Row> (io.github.kidx/Store<#A1>).count(): kotlin/Long // io.github.kidx/ReadScope.count|count@io.github.kidx.Store<0:0>(){0§<io.github.kidx.Row>}[0]
+    final suspend fun <#A1: io.github.kidx/Row> (io.github.kidx/Store<#A1>).count(io.github.kidx/Index<#A1>, kotlin/Function1<io.github.kidx/QueryBuilder<#A1>, kotlin/Unit>): kotlin/Long // io.github.kidx/ReadScope.count|count@io.github.kidx.Store<0:0>(io.github.kidx.Index<0:0>;kotlin.Function1<io.github.kidx.QueryBuilder<0:0>,kotlin.Unit>){0§<io.github.kidx.Row>}[0]
+    final suspend fun <#A1: io.github.kidx/Row> (io.github.kidx/Store<#A1>).find(io.github.kidx/Index<#A1>, kotlin/Function1<io.github.kidx/QueryBuilder<#A1>, kotlin/Unit>): kotlin.collections/List<#A1> // io.github.kidx/ReadScope.find|find@io.github.kidx.Store<0:0>(io.github.kidx.Index<0:0>;kotlin.Function1<io.github.kidx.QueryBuilder<0:0>,kotlin.Unit>){0§<io.github.kidx.Row>}[0]
+    final suspend fun <#A1: io.github.kidx/Row> (io.github.kidx/Store<#A1>).first(io.github.kidx/Index<#A1>, kotlin/Function1<io.github.kidx/QueryBuilder<#A1>, kotlin/Unit>): #A1? // io.github.kidx/ReadScope.first|first@io.github.kidx.Store<0:0>(io.github.kidx.Index<0:0>;kotlin.Function1<io.github.kidx.QueryBuilder<0:0>,kotlin.Unit>){0§<io.github.kidx.Row>}[0]
+    final suspend fun <#A1: io.github.kidx/Row> (io.github.kidx/Store<#A1>).get(kotlin/Any): #A1? // io.github.kidx/ReadScope.get|get@io.github.kidx.Store<0:0>(kotlin.Any){0§<io.github.kidx.Row>}[0]
+    final suspend fun <#A1: io.github.kidx/Row> (io.github.kidx/Store<#A1>).stream(io.github.kidx/Index<#A1>, kotlin/Function1<io.github.kidx/QueryBuilder<#A1>, kotlin/Unit>): kotlinx.coroutines.flow/Flow<#A1> // io.github.kidx/ReadScope.stream|stream@io.github.kidx.Store<0:0>(io.github.kidx.Index<0:0>;kotlin.Function1<io.github.kidx.QueryBuilder<0:0>,kotlin.Unit>){0§<io.github.kidx.Row>}[0]
+    final suspend fun <#A1: kotlin/Any?> (kotlinx.coroutines.flow/Flow<#A1>).collect(kotlin/Function1<#A1, kotlin/Unit>) // io.github.kidx/ReadScope.collect|collect@kotlinx.coroutines.flow.Flow<0:0>(kotlin.Function1<0:0,kotlin.Unit>){0§<kotlin.Any?>}[0]
+}
+
+sealed class <#A: kotlin/Any?, #B: io.github.kidx/Store<#C>, #C: io.github.kidx/Row> io.github.kidx/Field { // io.github.kidx/Field|null[0]
+    final val name // io.github.kidx/Field.name|{}name[0]
+        final fun <get-name>(): kotlin/String // io.github.kidx/Field.name.<get-name>|<get-name>(){}[0]
+    final val nullable // io.github.kidx/Field.nullable|{}nullable[0]
+        final fun <get-nullable>(): kotlin/Boolean // io.github.kidx/Field.nullable.<get-nullable>|<get-nullable>(){}[0]
+    final val type // io.github.kidx/Field.type|{}type[0]
+        final fun <get-type>(): io.github.kidx/FieldType<#A> // io.github.kidx/Field.type.<get-type>|<get-type>(){}[0]
+
+    final var ordinal // io.github.kidx/Field.ordinal|{}ordinal[0]
+        final fun <get-ordinal>(): kotlin/Int // io.github.kidx/Field.ordinal.<get-ordinal>|<get-ordinal>(){}[0]
+
+    open fun toString(): kotlin/String // io.github.kidx/Field.toString|toString(){}[0]
+
+    final class <#A1: kotlin/Any?, #B1: io.github.kidx/Store<#C1>, #C1: io.github.kidx/Row> KeyField : io.github.kidx/Field.NotNullField<#A1, #B1, #C1> { // io.github.kidx/Field.KeyField|null[0]
+        final val keyType // io.github.kidx/Field.KeyField.keyType|{}keyType[0]
+            final fun <get-keyType>(): io.github.kidx/KeyFieldType<#A1> // io.github.kidx/Field.KeyField.keyType.<get-keyType>|<get-keyType>(){}[0]
+    }
+
+    final class <#A1: kotlin/Any?, #B1: io.github.kidx/Store<#C1>, #C1: io.github.kidx/Row> NullableField : io.github.kidx/Field<#A1, #B1, #C1> { // io.github.kidx/Field.NullableField|null[0]
+        final fun getValue(#C1, kotlin.reflect/KProperty<*>): #A1? // io.github.kidx/Field.NullableField.getValue|getValue(1:2;kotlin.reflect.KProperty<*>){}[0]
+        final fun setValue(#C1, kotlin.reflect/KProperty<*>, #A1?) // io.github.kidx/Field.NullableField.setValue|setValue(1:2;kotlin.reflect.KProperty<*>;1:0?){}[0]
+    }
+
+    final class <#A1: kotlin/Any?> NullableSpec { // io.github.kidx/Field.NullableSpec|null[0]
+        final fun <#A2: io.github.kidx/Store<#B2>, #B2: io.github.kidx/Row> provideDelegate(#A2, kotlin.reflect/KProperty<*>): kotlin.properties/ReadOnlyProperty<#A2, io.github.kidx/Field.NullableField<#A1, #A2, #B2>> // io.github.kidx/Field.NullableSpec.provideDelegate|provideDelegate(0:0;kotlin.reflect.KProperty<*>){0§<io.github.kidx.Store<0:1>>;1§<io.github.kidx.Row>}[0]
+    }
+
+    final class <#A1: kotlin/Any?> PrimaryKeySpec { // io.github.kidx/Field.PrimaryKeySpec|null[0]
+        final fun <#A2: io.github.kidx/Store<#B2>, #B2: io.github.kidx/Row> provideDelegate(#A2, kotlin.reflect/KProperty<*>): kotlin.properties/ReadOnlyProperty<#A2, io.github.kidx/Field.KeyField<#A1, #A2, #B2>> // io.github.kidx/Field.PrimaryKeySpec.provideDelegate|provideDelegate(0:0;kotlin.reflect.KProperty<*>){0§<io.github.kidx.Store<0:1>>;1§<io.github.kidx.Row>}[0]
+    }
+
+    final class Blob : io.github.kidx/Field.Spec<io.github.kidx/Blob> { // io.github.kidx/Field.Blob|null[0]
+        constructor <init>() // io.github.kidx/Field.Blob.<init>|<init>(){}[0]
+    }
+
+    final class Boolean : io.github.kidx/Field.Spec<kotlin/Boolean> { // io.github.kidx/Field.Boolean|null[0]
+        constructor <init>() // io.github.kidx/Field.Boolean.<init>|<init>(){}[0]
+    }
+
+    final class Double : io.github.kidx/Field.KeySpec<kotlin/Double> { // io.github.kidx/Field.Double|null[0]
+        constructor <init>() // io.github.kidx/Field.Double.<init>|<init>(){}[0]
+    }
+
+    final class Instant : io.github.kidx/Field.KeySpec<kotlin.time/Instant> { // io.github.kidx/Field.Instant|null[0]
+        constructor <init>() // io.github.kidx/Field.Instant.<init>|<init>(){}[0]
+    }
+
+    final class Int : io.github.kidx/Field.KeySpec<kotlin/Int> { // io.github.kidx/Field.Int|null[0]
+        constructor <init>() // io.github.kidx/Field.Int.<init>|<init>(){}[0]
+    }
+
+    final class Text : io.github.kidx/Field.KeySpec<kotlin/String> { // io.github.kidx/Field.Text|null[0]
+        constructor <init>() // io.github.kidx/Field.Text.<init>|<init>(){}[0]
+    }
+
+    final class UUID : io.github.kidx/Field.KeySpec<kotlin.uuid/Uuid> { // io.github.kidx/Field.UUID|null[0]
+        constructor <init>() // io.github.kidx/Field.UUID.<init>|<init>(){}[0]
+    }
+
+    open class <#A1: kotlin/Any?, #B1: io.github.kidx/Store<#C1>, #C1: io.github.kidx/Row> NotNullField : io.github.kidx/Field<#A1, #B1, #C1> { // io.github.kidx/Field.NotNullField|null[0]
+        final fun getValue(#C1, kotlin.reflect/KProperty<*>): #A1 // io.github.kidx/Field.NotNullField.getValue|getValue(1:2;kotlin.reflect.KProperty<*>){}[0]
+        final fun setValue(#C1, kotlin.reflect/KProperty<*>, #A1) // io.github.kidx/Field.NotNullField.setValue|setValue(1:2;kotlin.reflect.KProperty<*>;1:0){}[0]
+    }
+
+    open class <#A1: kotlin/Any?> KeySpec { // io.github.kidx/Field.KeySpec|null[0]
+        final fun <#A2: io.github.kidx/Store<#B2>, #B2: io.github.kidx/Row> provideDelegate(#A2, kotlin.reflect/KProperty<*>): kotlin.properties/ReadOnlyProperty<#A2, io.github.kidx/Field.KeyField<#A1, #A2, #B2>> // io.github.kidx/Field.KeySpec.provideDelegate|provideDelegate(0:0;kotlin.reflect.KProperty<*>){0§<io.github.kidx.Store<0:1>>;1§<io.github.kidx.Row>}[0]
+        final fun nullable(): io.github.kidx/Field.NullableSpec<#A1> // io.github.kidx/Field.KeySpec.nullable|nullable(){}[0]
+        final fun primaryKey(kotlin/Boolean = ...): io.github.kidx/Field.PrimaryKeySpec<#A1> // io.github.kidx/Field.KeySpec.primaryKey|primaryKey(kotlin.Boolean){}[0]
+    }
+
+    open class <#A1: kotlin/Any?> Spec { // io.github.kidx/Field.Spec|null[0]
+        final fun <#A2: io.github.kidx/Store<#B2>, #B2: io.github.kidx/Row> provideDelegate(#A2, kotlin.reflect/KProperty<*>): kotlin.properties/ReadOnlyProperty<#A2, io.github.kidx/Field.NotNullField<#A1, #A2, #B2>> // io.github.kidx/Field.Spec.provideDelegate|provideDelegate(0:0;kotlin.reflect.KProperty<*>){0§<io.github.kidx.Store<0:1>>;1§<io.github.kidx.Row>}[0]
+        final fun nullable(): io.github.kidx/Field.NullableSpec<#A1> // io.github.kidx/Field.Spec.nullable|nullable(){}[0]
+    }
+
+    final object Companion { // io.github.kidx/Field.Companion|null[0]
+        final fun <#A2: kotlin/Any?> of(io.github.kidx/FieldType<#A2>): io.github.kidx/Field.Spec<#A2> // io.github.kidx/Field.Companion.of|of(io.github.kidx.FieldType<0:0>){0§<kotlin.Any?>}[0]
+        final fun <#A2: kotlin/Any?> of(io.github.kidx/KeyFieldType<#A2>): io.github.kidx/Field.KeySpec<#A2> // io.github.kidx/Field.Companion.of|of(io.github.kidx.KeyFieldType<0:0>){0§<kotlin.Any?>}[0]
+        final inline fun <#A2: reified kotlin/Enum<#A2>> enum(): io.github.kidx/Field.KeySpec<#A2> // io.github.kidx/Field.Companion.enum|enum(){0§<kotlin.Enum<0:0>>}[0]
+    }
+}
+
+final object io.github.kidx/BlobFieldType : io.github.kidx/FieldType<io.github.kidx/Blob> { // io.github.kidx/BlobFieldType|null[0]
+    final val description // io.github.kidx/BlobFieldType.description|{}description[0]
+        final fun <get-description>(): kotlin/String // io.github.kidx/BlobFieldType.description.<get-description>|<get-description>(){}[0]
+
+    // Targets: [js]
+    final fun decode(kotlin/Any): io.github.kidx/Blob // io.github.kidx/BlobFieldType.decode|decode(kotlin.Any){}[0]
+
+    // Targets: [js]
+    final fun encode(io.github.kidx/Blob): kotlin/Any // io.github.kidx/BlobFieldType.encode|encode(io.github.kidx.Blob){}[0]
+
+    // Targets: [wasmJs]
+    final fun decode(kotlin.js/JsAny): io.github.kidx/Blob // io.github.kidx/BlobFieldType.decode|decode(kotlin.js.JsAny){}[0]
+
+    // Targets: [wasmJs]
+    final fun encode(io.github.kidx/Blob): kotlin.js/JsAny // io.github.kidx/BlobFieldType.encode|encode(io.github.kidx.Blob){}[0]
+}
+
+final object io.github.kidx/BooleanFieldType : io.github.kidx/FieldType<kotlin/Boolean> { // io.github.kidx/BooleanFieldType|null[0]
+    final val description // io.github.kidx/BooleanFieldType.description|{}description[0]
+        final fun <get-description>(): kotlin/String // io.github.kidx/BooleanFieldType.description.<get-description>|<get-description>(){}[0]
+
+    // Targets: [js]
+    final fun decode(kotlin/Any): kotlin/Boolean // io.github.kidx/BooleanFieldType.decode|decode(kotlin.Any){}[0]
+
+    // Targets: [js]
+    final fun encode(kotlin/Boolean): kotlin/Any // io.github.kidx/BooleanFieldType.encode|encode(kotlin.Boolean){}[0]
+
+    // Targets: [wasmJs]
+    final fun decode(kotlin.js/JsAny): kotlin/Boolean // io.github.kidx/BooleanFieldType.decode|decode(kotlin.js.JsAny){}[0]
+
+    // Targets: [wasmJs]
+    final fun encode(kotlin/Boolean): kotlin.js/JsAny // io.github.kidx/BooleanFieldType.encode|encode(kotlin.Boolean){}[0]
+}
+
+final object io.github.kidx/DoubleFieldType : io.github.kidx/KeyFieldType<kotlin/Double> { // io.github.kidx/DoubleFieldType|null[0]
+    final val description // io.github.kidx/DoubleFieldType.description|{}description[0]
+        final fun <get-description>(): kotlin/String // io.github.kidx/DoubleFieldType.description.<get-description>|<get-description>(){}[0]
+
+    // Targets: [js]
+    final fun decode(kotlin/Any): kotlin/Double // io.github.kidx/DoubleFieldType.decode|decode(kotlin.Any){}[0]
+
+    // Targets: [js]
+    final fun encode(kotlin/Double): kotlin/Any // io.github.kidx/DoubleFieldType.encode|encode(kotlin.Double){}[0]
+
+    // Targets: [wasmJs]
+    final fun decode(kotlin.js/JsAny): kotlin/Double // io.github.kidx/DoubleFieldType.decode|decode(kotlin.js.JsAny){}[0]
+
+    // Targets: [wasmJs]
+    final fun encode(kotlin/Double): kotlin.js/JsAny // io.github.kidx/DoubleFieldType.encode|encode(kotlin.Double){}[0]
+}
+
+final object io.github.kidx/InstantFieldType : io.github.kidx/KeyFieldType<kotlin.time/Instant> { // io.github.kidx/InstantFieldType|null[0]
+    final val description // io.github.kidx/InstantFieldType.description|{}description[0]
+        final fun <get-description>(): kotlin/String // io.github.kidx/InstantFieldType.description.<get-description>|<get-description>(){}[0]
+
+    // Targets: [js]
+    final fun decode(kotlin/Any): kotlin.time/Instant // io.github.kidx/InstantFieldType.decode|decode(kotlin.Any){}[0]
+
+    // Targets: [js]
+    final fun encode(kotlin.time/Instant): kotlin/Any // io.github.kidx/InstantFieldType.encode|encode(kotlin.time.Instant){}[0]
+
+    // Targets: [wasmJs]
+    final fun decode(kotlin.js/JsAny): kotlin.time/Instant // io.github.kidx/InstantFieldType.decode|decode(kotlin.js.JsAny){}[0]
+
+    // Targets: [wasmJs]
+    final fun encode(kotlin.time/Instant): kotlin.js/JsAny // io.github.kidx/InstantFieldType.encode|encode(kotlin.time.Instant){}[0]
+}
+
+final object io.github.kidx/IntFieldType : io.github.kidx/KeyFieldType<kotlin/Int> { // io.github.kidx/IntFieldType|null[0]
+    final val description // io.github.kidx/IntFieldType.description|{}description[0]
+        final fun <get-description>(): kotlin/String // io.github.kidx/IntFieldType.description.<get-description>|<get-description>(){}[0]
+
+    // Targets: [js]
+    final fun decode(kotlin/Any): kotlin/Int // io.github.kidx/IntFieldType.decode|decode(kotlin.Any){}[0]
+
+    // Targets: [js]
+    final fun encode(kotlin/Int): kotlin/Any // io.github.kidx/IntFieldType.encode|encode(kotlin.Int){}[0]
+
+    // Targets: [wasmJs]
+    final fun decode(kotlin.js/JsAny): kotlin/Int // io.github.kidx/IntFieldType.decode|decode(kotlin.js.JsAny){}[0]
+
+    // Targets: [wasmJs]
+    final fun encode(kotlin/Int): kotlin.js/JsAny // io.github.kidx/IntFieldType.encode|encode(kotlin.Int){}[0]
+}
+
+final object io.github.kidx/TextFieldType : io.github.kidx/KeyFieldType<kotlin/String> { // io.github.kidx/TextFieldType|null[0]
+    final val description // io.github.kidx/TextFieldType.description|{}description[0]
+        final fun <get-description>(): kotlin/String // io.github.kidx/TextFieldType.description.<get-description>|<get-description>(){}[0]
+
+    // Targets: [js]
+    final fun decode(kotlin/Any): kotlin/String // io.github.kidx/TextFieldType.decode|decode(kotlin.Any){}[0]
+
+    // Targets: [js]
+    final fun encode(kotlin/String): kotlin/Any // io.github.kidx/TextFieldType.encode|encode(kotlin.String){}[0]
+
+    // Targets: [wasmJs]
+    final fun decode(kotlin.js/JsAny): kotlin/String // io.github.kidx/TextFieldType.decode|decode(kotlin.js.JsAny){}[0]
+
+    // Targets: [wasmJs]
+    final fun encode(kotlin/String): kotlin.js/JsAny // io.github.kidx/TextFieldType.encode|encode(kotlin.String){}[0]
+}
+
+final object io.github.kidx/UuidFieldType : io.github.kidx/KeyFieldType<kotlin.uuid/Uuid> { // io.github.kidx/UuidFieldType|null[0]
+    final val description // io.github.kidx/UuidFieldType.description|{}description[0]
+        final fun <get-description>(): kotlin/String // io.github.kidx/UuidFieldType.description.<get-description>|<get-description>(){}[0]
+
+    // Targets: [js]
+    final fun decode(kotlin/Any): kotlin.uuid/Uuid // io.github.kidx/UuidFieldType.decode|decode(kotlin.Any){}[0]
+
+    // Targets: [js]
+    final fun encode(kotlin.uuid/Uuid): kotlin/Any // io.github.kidx/UuidFieldType.encode|encode(kotlin.uuid.Uuid){}[0]
+
+    // Targets: [wasmJs]
+    final fun decode(kotlin.js/JsAny): kotlin.uuid/Uuid // io.github.kidx/UuidFieldType.decode|decode(kotlin.js.JsAny){}[0]
+
+    // Targets: [wasmJs]
+    final fun encode(kotlin.uuid/Uuid): kotlin.js/JsAny // io.github.kidx/UuidFieldType.encode|encode(kotlin.uuid.Uuid){}[0]
+}
+
+final fun (io.github.kidx/Database).io.github.kidx/connectNotifications(io.github.kidx/NotificationTransport): io.github.kidx/Registration // io.github.kidx/connectNotifications|connectNotifications@io.github.kidx.Database(io.github.kidx.NotificationTransport){}[0]
+final fun <#A: io.github.kidx/Row> (#A).io.github.kidx/isSet(io.github.kidx/Field<*, *, #A>): kotlin/Boolean // io.github.kidx/isSet|isSet@0:0(io.github.kidx.Field<*,*,0:0>){0§<io.github.kidx.Row>}[0]
+final fun <#A: io.github.kidx/Row> (io.github.kidx/Store<#A>).io.github.kidx/describe(io.github.kidx/Index<#A>, kotlin/Function1<io.github.kidx/QueryBuilder<#A>, kotlin/Unit>): io.github.kidx/QueryDescription // io.github.kidx/describe|describe@io.github.kidx.Store<0:0>(io.github.kidx.Index<0:0>;kotlin.Function1<io.github.kidx.QueryBuilder<0:0>,kotlin.Unit>){0§<io.github.kidx.Row>}[0]
+final fun <#A: io.github.kidx/Row> (io.github.kidx/Store<#A>).io.github.kidx/index(kotlin/Array<out io.github.kidx/Field.KeyField<*, *, #A>>..., kotlin/Boolean = ...): kotlin.properties/PropertyDelegateProvider<io.github.kidx/Store<#A>, kotlin.properties/ReadOnlyProperty<io.github.kidx/Store<#A>, io.github.kidx/Index<#A>>> // io.github.kidx/index|index@io.github.kidx.Store<0:0>(kotlin.Array<out|io.github.kidx.Field.KeyField<*,*,0:0>>...;kotlin.Boolean){0§<io.github.kidx.Row>}[0]
+final fun <#A: io.github.kidx/Row> (io.github.kidx/Store<#A>).io.github.kidx/observe(io.github.kidx/Database): kotlinx.coroutines.flow/Flow<kotlin.collections/List<#A>> // io.github.kidx/observe|observe@io.github.kidx.Store<0:0>(io.github.kidx.Database){0§<io.github.kidx.Row>}[0]
+final fun <#A: io.github.kidx/Row> (io.github.kidx/Store<#A>).io.github.kidx/observe(io.github.kidx/Database, io.github.kidx/Index<#A>, kotlin/Function1<io.github.kidx/QueryBuilder<#A>, kotlin/Unit>): kotlinx.coroutines.flow/Flow<kotlin.collections/List<#A>> // io.github.kidx/observe|observe@io.github.kidx.Store<0:0>(io.github.kidx.Database;io.github.kidx.Index<0:0>;kotlin.Function1<io.github.kidx.QueryBuilder<0:0>,kotlin.Unit>){0§<io.github.kidx.Row>}[0]
+final fun <#A: kotlin/Any?, #B: kotlin/Any?> (io.github.kidx/FieldType<#B>).io.github.kidx/convert(kotlin/Function1<#A, #B>, kotlin/Function1<#B, #A>): io.github.kidx/FieldType<#A> // io.github.kidx/convert|convert@io.github.kidx.FieldType<0:1>(kotlin.Function1<0:0,0:1>;kotlin.Function1<0:1,0:0>){0§<kotlin.Any?>;1§<kotlin.Any?>}[0]
+final fun <#A: kotlin/Any?, #B: kotlin/Any?> (io.github.kidx/KeyFieldType<#B>).io.github.kidx/convert(kotlin/Function1<#A, #B>, kotlin/Function1<#B, #A>): io.github.kidx/KeyFieldType<#A> // io.github.kidx/convert|convert@io.github.kidx.KeyFieldType<0:1>(kotlin.Function1<0:0,0:1>;kotlin.Function1<0:1,0:0>){0§<kotlin.Any?>;1§<kotlin.Any?>}[0]
+final fun <#A: kotlin/Any?> (io.github.kidx/Database).io.github.kidx/observe(kotlin.collections/Set<kotlin/String>, kotlin.coroutines/SuspendFunction1<io.github.kidx/ReadScope, #A>): kotlinx.coroutines.flow/Flow<#A> // io.github.kidx/observe|observe@io.github.kidx.Database(kotlin.collections.Set<kotlin.String>;kotlin.coroutines.SuspendFunction1<io.github.kidx.ReadScope,0:0>){0§<kotlin.Any?>}[0]
+final inline fun <#A: reified kotlin/Enum<#A>> io.github.kidx/enumFieldType(): io.github.kidx/KeyFieldType<#A> // io.github.kidx/enumFieldType|enumFieldType(){0§<kotlin.Enum<0:0>>}[0]
+final suspend fun io.github.kidx/deleteDatabase(kotlin/String) // io.github.kidx/deleteDatabase|deleteDatabase(kotlin.String){}[0]
+final suspend fun io.github.kidx/openDatabase(io.github.kidx/Schema, kotlin/Function1<io.github.kidx/VersionChangeSignal, kotlin/Unit> = ...): io.github.kidx/Database // io.github.kidx/openDatabase|openDatabase(io.github.kidx.Schema;kotlin.Function1<io.github.kidx.VersionChangeSignal,kotlin.Unit>){}[0]
+
+// Targets: [js]
+abstract interface io.github.kidx/Blob // io.github.kidx/Blob|null[0]
+
+// Targets: [wasmJs]
+abstract interface io.github.kidx/Blob : kotlin.js/JsAny // io.github.kidx/Blob|null[0]

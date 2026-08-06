@@ -4,7 +4,7 @@ import kotlin.js.JsArray
 import kotlin.js.JsString
 
 /** https://developer.mozilla.org/en-US/docs/Web/API/IDBDatabase */
-public external interface IDBDatabase : EventTarget {
+internal external interface IDBDatabase : EventTarget {
     public val name: String
     public val version: Int
     public val objectStoreNames: JsArray<JsString>

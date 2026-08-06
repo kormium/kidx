@@ -3,6 +3,7 @@ plugins {
     // Validates the public ABI. An API change requires `./gradlew apiDump` and a review of the
     // .api diff — same discipline as kormium.
     alias(libs.plugins.binary.compatibility.validator)
+    alias(libs.plugins.maven.publish)
 }
 
 apiValidation {
@@ -62,6 +63,39 @@ kotlin {
         // runs on both targets.
         jsTest.dependencies {
             implementation(npm("fake-indexeddb", "^6.0.0"))
+        }
+    }
+}
+
+mavenPublishing {
+    publishToMavenCentral()
+
+    // Release signing comes from ~/.gradle/gradle.properties or CI env (ORG_GRADLE_PROJECT_*):
+    // signingInMemoryKey / signingInMemoryKeyPassword. Guarded so a local build without keys works.
+    if (providers.gradleProperty("signingInMemoryKey").isPresent) {
+        signAllPublications()
+    }
+
+    pom {
+        name.set("kidx")
+        description.set("Typed Kotlin storage over IndexedDB: schema, rows, indexed queries, migrations.")
+        url.set("https://github.com/kormium/kidx")
+        licenses {
+            license {
+                name.set("The Apache License, Version 2.0")
+                url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
+            }
+        }
+        developers {
+            developer {
+                id.set("sknyazev")
+                name.set("Sergey Knyazev")
+            }
+        }
+        scm {
+            url.set("https://github.com/kormium/kidx")
+            connection.set("scm:git:git://github.com/kormium/kidx.git")
+            developerConnection.set("scm:git:ssh://git@github.com/kormium/kidx.git")
         }
     }
 }

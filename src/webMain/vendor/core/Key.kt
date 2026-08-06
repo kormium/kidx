@@ -4,7 +4,7 @@ import com.juul.indexeddb.external.IDBKey
 import com.juul.indexeddb.external.IDBKeyRange
 import kotlin.js.toJsArray
 
-public class Key(
+internal class Key(
     private val value: IDBKey,
     private vararg val moreValues: IDBKey,
 ) {
@@ -14,23 +14,23 @@ public class Key(
     }
 }
 
-public fun lowerBound(
+internal fun lowerBound(
     x: IDBKey,
     open: Boolean = false,
 ): Key = Key(IDBKeyRange.lowerBound(x, open))
 
-public fun upperBound(
+internal fun upperBound(
     y: IDBKey,
     open: Boolean = false,
 ): Key = Key(IDBKeyRange.upperBound(y, open))
 
-public fun bound(
+internal fun bound(
     x: IDBKey,
     y: IDBKey,
     lowerOpen: Boolean = false,
     upperOpen: Boolean = false,
 ): Key = Key(IDBKeyRange.bound(x, y, lowerOpen, upperOpen))
 
-public fun only(
+internal fun only(
     z: IDBKey,
 ): Key = Key(IDBKeyRange.only(z))

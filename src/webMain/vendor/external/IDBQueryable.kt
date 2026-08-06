@@ -5,7 +5,7 @@ import kotlin.js.JsArray
 import kotlin.js.JsNumber
 
 /** Pseudo-interface for the shared query functionality between [IDBIndex] and [IDBObjectStore]. */
-public external interface IDBQueryable : JsAny {
+internal external interface IDBQueryable : JsAny {
 
     public fun count(): IDBRequest<JsNumber>
     public fun count(key: IDBKey): IDBRequest<JsNumber>

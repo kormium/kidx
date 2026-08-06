@@ -34,3 +34,29 @@ public class QueryException internal constructor(message: String) : KidxExceptio
  * public because a custom [FieldType] needs to raise it too.
  */
 public class FieldTypeException(message: String) : KidxException(message)
+
+/**
+ * A failure the engine reported. IndexedDB answers with a `DOMException` whose `name` is the whole
+ * classification, so the useful ones get their own type and the rest arrive as this.
+ *
+ * These exist because the driver's own exception types are not part of kidx's public surface: a
+ * consumer must be able to tell a duplicate key from a full disk without naming a vendored class.
+ */
+public open class EngineException internal constructor(
+    /** The `DOMException.name` the engine gave, e.g. `ConstraintError`. */
+    public val errorName: String,
+    message: String,
+    cause: Throwable?,
+) : KidxException(message, cause)
+
+/** A duplicate primary key, or a unique-index violation. The whole transaction is gone with it. */
+public class ConstraintViolationException internal constructor(
+    message: String,
+    cause: Throwable?,
+) : EngineException("ConstraintError", message, cause)
+
+/** Out of storage. The browser decides the budget, and can evict without asking. */
+public class QuotaExceededException internal constructor(
+    message: String,
+    cause: Throwable?,
+) : EngineException("QuotaExceededError", message, cause)

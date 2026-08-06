@@ -7,7 +7,7 @@ import kotlin.js.JsString
 import kotlin.js.toJsString
 
 /** https://developer.mozilla.org/en-US/docs/Web/API/IDBTransaction/durability */
-public enum class Durability {
+internal enum class Durability {
     Default,
     Strict,
     Relaxed,

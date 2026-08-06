@@ -8,7 +8,7 @@ import kotlinx.coroutines.channels.SendChannel
 import kotlin.js.JsString
 import kotlin.js.toJsString
 
-public open class Cursor internal constructor(
+internal open class Cursor internal constructor(
     internal open val cursor: IDBCursor,
     private val channel: SendChannel<*>,
 ) {
@@ -48,7 +48,7 @@ public open class Cursor internal constructor(
     }
 }
 
-public class CursorWithValue internal constructor(
+internal class CursorWithValue internal constructor(
     override val cursor: IDBCursorWithValue,
     channel: SendChannel<*>,
 ) : Cursor(cursor, channel) {

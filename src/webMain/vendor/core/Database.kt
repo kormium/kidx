@@ -23,7 +23,7 @@ import kotlin.js.toJsString
  * - flow operations on the flows returns by [Transaction.openCursor] and [Transaction.openKeyCursor]
  * - `suspend` functions composed entirely of other legal functions
  */
-public suspend fun openDatabase(
+internal suspend fun openDatabase(
     name: String,
     version: Int,
     logger: Logger = NoOpLogger,
@@ -65,7 +65,7 @@ public suspend fun openDatabase(
     }
 }
 
-public suspend fun deleteDatabase(
+internal suspend fun deleteDatabase(
     name: String,
     logger: Logger = NoOpLogger,
 ) {
@@ -84,7 +84,7 @@ public suspend fun deleteDatabase(
     }
 }
 
-public class Database internal constructor(
+internal class Database internal constructor(
     initialDatabase: IDBDatabase,
     private val logger: Logger,
 ) {

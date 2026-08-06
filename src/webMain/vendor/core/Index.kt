@@ -7,7 +7,7 @@ import com.juul.indexeddb.external.IDBValue
 import kotlin.js.JsArray
 import kotlin.js.JsNumber
 
-public class Index internal constructor(
+internal class Index internal constructor(
     internal val index: IDBIndex,
 ) : Queryable() {
 

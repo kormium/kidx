@@ -3,7 +3,7 @@ package com.juul.indexeddb.external
 import kotlin.js.JsAny
 
 /** https://developer.mozilla.org/en-US/docs/Web/API/IDBCursor */
-public external interface IDBCursor : JsAny {
+internal external interface IDBCursor : JsAny {
     public val key: IDBKey
     public val primaryKey: IDBKey
 

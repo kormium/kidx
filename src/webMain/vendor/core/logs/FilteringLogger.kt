@@ -2,10 +2,10 @@ package com.juul.indexeddb.logs
 
 import com.juul.indexeddb.external.Event
 
-public fun Logger.filterTypes(vararg whitelist: Type): Logger =
+internal fun Logger.filterTypes(vararg whitelist: Type): Logger =
     filterTypes(whitelist.toSet())
 
-public fun Logger.filterTypes(whitelist: Set<Type>): Logger =
+internal fun Logger.filterTypes(whitelist: Set<Type>): Logger =
     FilteringLogger(whitelist, this)
 
 private class FilteringLogger(

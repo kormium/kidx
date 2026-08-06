@@ -3,7 +3,7 @@ package com.juul.indexeddb.logs
 import com.juul.indexeddb.external.Event
 import com.juul.indexeddb.external.IDBVersionChangeEvent
 
-public fun Logger.embedEventsInMessages(
+internal fun Logger.embedEventsInMessages(
     separator: String = "\n    ",
 ): Logger = EventAsMessageLogger(separator, this)
 

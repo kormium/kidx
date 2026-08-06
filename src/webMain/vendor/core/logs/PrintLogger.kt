@@ -2,7 +2,7 @@ package com.juul.indexeddb.logs
 
 import com.juul.indexeddb.external.Event
 
-public object PrintLogger : Logger {
+internal object PrintLogger : Logger {
 
     override fun log(type: Type, event: Event?, message: () -> String) {
         val msg = message()

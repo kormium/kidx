@@ -1,7 +1,7 @@
 package com.juul.indexeddb.external
 
 /** https://developer.mozilla.org/en-US/docs/Web/API/IDBTransaction */
-public external interface IDBTransaction : EventTarget {
+internal external interface IDBTransaction : EventTarget {
     public val objectStoreNames: DOMStringList
     public val db: IDBDatabase
     public val durability: IDBDurability

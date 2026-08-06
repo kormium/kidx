@@ -5,7 +5,7 @@ import com.juul.indexeddb.external.IDBKeyPath
 import kotlin.js.toJsArray
 import kotlin.js.toJsString
 
-public class KeyPath(
+internal class KeyPath(
     private val path: String,
     private vararg val morePaths: String,
 ) {

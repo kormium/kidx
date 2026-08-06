@@ -6,7 +6,7 @@ import com.juul.indexeddb.external.IDBValue
 import kotlin.js.JsArray
 import kotlin.js.JsNumber
 
-public sealed class Queryable {
+internal sealed class Queryable {
     /** Either "index" or "object store". */
     internal abstract val type: String
     internal abstract val name: String

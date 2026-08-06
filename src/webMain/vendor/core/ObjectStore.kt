@@ -7,7 +7,7 @@ import com.juul.indexeddb.external.IDBValue
 import kotlin.js.JsArray
 import kotlin.js.JsNumber
 
-public class ObjectStore internal constructor(
+internal class ObjectStore internal constructor(
     internal val objectStore: IDBObjectStore,
 ) : Queryable() {
 

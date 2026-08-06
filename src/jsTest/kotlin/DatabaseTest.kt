@@ -72,12 +72,14 @@ class DatabaseTest {
         db.write(Users) { Users.add(user(uuidA, "Ada", "ada@example.com")) }
 
         // Decision 6: one rejected write discards every other write in the same scope.
-        assertFailsWith<Throwable> {
+        val failure = assertFailsWith<ConstraintViolationException> {
             db.write(Users) {
                 Users.put(user(uuidB, "Grace", "grace@example.com"))
                 Users.add(user(uuidA, "Ada again", "ada2@example.com"))
             }
         }
+        assertTrue("kidx-test" in failure.message!!, failure.message!!)
+        assertEquals("ConstraintError", failure.errorName)
         assertNull(db.read(Users) { Users.get(uuidB) })
     }
 

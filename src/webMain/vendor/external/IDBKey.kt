@@ -8,4 +8,4 @@ import kotlin.js.JsString
  * Must be any of [string][JsString], [number][JsNumber], `date`, `Blob`, arrays of this or the previous types, or
  * an [IDBKeyRange].
  */
-public typealias IDBKey = JsAny
+internal typealias IDBKey = JsAny

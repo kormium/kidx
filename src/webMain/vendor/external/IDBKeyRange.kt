@@ -3,7 +3,7 @@ package com.juul.indexeddb.external
 import kotlin.js.JsAny
 
 /** https://developer.mozilla.org/en-US/docs/Web/API/IDBKeyRange */
-public external class IDBKeyRange : JsAny {
+internal external class IDBKeyRange : JsAny {
 
     public val lower: IDBKey?
     public val upper: IDBKey?

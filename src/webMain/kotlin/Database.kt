@@ -2,6 +2,7 @@ package io.github.kidx
 
 import com.juul.indexeddb.AutoIncrement
 import com.juul.indexeddb.KeyPath
+import com.juul.indexeddb.EventException
 import com.juul.indexeddb.OpenBlockedException
 import com.juul.indexeddb.external.IDBDatabase
 import kotlinx.coroutines.CoroutineScope
@@ -146,7 +147,9 @@ public class Database internal constructor(
     internal suspend fun <T> read(stores: Set<String>, block: suspend ReadScope.() -> T): T {
         checkOpen()
         require(stores)
-        return driver.transaction(*stores.toTypedArray()) { ReadScope(this, stores).block() }
+        return translatingEngineFailures {
+            driver.transaction(*stores.toTypedArray()) { ReadScope(this, stores).block() }
+        }
     }
 
     /**
@@ -158,7 +161,9 @@ public class Database internal constructor(
         checkOpen()
         val names = stores.map { it.storeName }.toSet()
         require(names)
-        val result = driver.writeTransaction(*names.toTypedArray()) { WriteScope(this, names).block() }
+        val result = translatingEngineFailures {
+            driver.writeTransaction(*names.toTypedArray()) { WriteScope(this, names).block() }
+        }
         // After the commit, never before: the vendored writeTransaction awaits completion before it
         // returns, so reaching this line means the data is durable.
         writeListeners.fire(names)
@@ -267,6 +272,35 @@ public class Database internal constructor(
                     )
                 }
             }
+        }
+    }
+
+    /**
+     * Turns the driver's event-carrying exceptions into kidx's own, so a consumer can catch a duplicate
+     * key by type without naming a vendored class. An exception thrown by the caller's own block passes
+     * through untouched — it is not an engine failure, and the driver has already aborted for it.
+     */
+    private suspend fun <T> translatingEngineFailures(block: suspend () -> T): T = try {
+        block()
+    } catch (e: EventException) {
+        val name = jsErrorName(e.event)
+        val where = "database '${schema.databaseName}'"
+        throw when (name) {
+            "ConstraintError" -> ConstraintViolationException(
+                "A key or unique index was violated in $where. The whole transaction was discarded — " +
+                    "IndexedDB cannot ignore a single failed write.",
+                e,
+            )
+            "QuotaExceededError" -> QuotaExceededException(
+                "Storage quota exceeded writing to $where. The browser sets the budget and may evict " +
+                    "data on its own; see navigator.storage.estimate().",
+                e,
+            )
+            else -> EngineException(
+                name.ifEmpty { "TransactionError" },
+                "IndexedDB reported ${name.ifEmpty { "a transaction failure" }} on $where: ${e.message}",
+                e,
+            )
         }
     }
 
