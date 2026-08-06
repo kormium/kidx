@@ -89,7 +89,7 @@ matches the database.
 
 ```kotlin
 dependencies {
-    implementation("io.github.kidx:kidx:0.1.0")
+    implementation("io.github.kormium:kidx:0.1.0")
 }
 ```
 

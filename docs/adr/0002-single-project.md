@@ -18,7 +18,7 @@ a sibling that does not exist.
 
 ## Decision
 
-A single-project Gradle build: the root **is** the library, published as `io.github.kidx:kidx`. The
+A single-project Gradle build: the root **is** the library, published as `io.github.kormium:kidx`. The
 vendored driver lives in its own source directory rather than its own module.
 
 ## Consequences

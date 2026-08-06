@@ -27,7 +27,9 @@ same taste, and in several places the same machinery (see decision 3) — but it
 Kormium's SQL execution. It is a new typed layer over a vetted low-level IndexedDB engine.
 
 Targets Kotlin/JS and Kotlin/Wasm (the vendored engine core supports both; see decision 4).
-Package: `io.github.kidx`.
+Published as `io.github.kormium:kidx`, in package `io.github.kidx` — the Maven coordinate follows the
+GitHub organization that owns the Central namespace, while the package stays short because it is the
+import surface every consumer types.
 
 ## Why this exists
 
@@ -91,7 +93,7 @@ free of platform types — and it does not survive contact with the code: `Field
 and from `kotlin.js.JsAny`, so every source set here is a web source set regardless. With the
 justification gone and exactly one engine to hide, a second module would be structure for its own sake;
 and once there is only one module, naming it `-core` promises a sibling that does not exist. So the
-root project is the library, published as `io.github.kidx:kidx`.
+root project is the library, published as `io.github.kormium:kidx`.
 
 Change notification is **built in**, not a `kidx-observe` module. Kormium splits its observe module off
 for one reason — keeping coroutines and `Flow` out of `kormium-core`; the seam itself (`WriteListener`,
@@ -1246,7 +1248,7 @@ family for what the engine reports), **the suspend discipline** (a runtime marke
 and **browser tests**, which now run: the same engine suite against a real Chromium on js and on wasmJs,
 99 tests each, alongside the Node run on `fake-indexeddb`.
 
-1. **Releasing.** The build publishes (`io.github.kidx:kidx`, verified against Maven local), signs when a
+1. **Releasing.** The build publishes (`io.github.kormium:kidx`, verified against Maven local), signs when a
    key is present, and CI checks both targets, both test runners and the ABI — but nothing has been
    released. What is missing is the decision of *when*: two breaking changes are wanted before `1.0`
    (index arity, and whatever enforces the suspend discipline), so a `0.1.0` published now is a promise

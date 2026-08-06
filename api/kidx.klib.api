@@ -5,7 +5,7 @@
 // - Show manifest properties: true
 // - Show declarations: true
 
-// Library unique name: <io.github.kidx:kidx>
+// Library unique name: <io.github.kormium:kidx>
 final enum class io.github.kidx/Direction : kotlin/Enum<io.github.kidx/Direction> { // io.github.kidx/Direction|null[0]
     enum entry ASC // io.github.kidx/Direction.ASC|null[0]
     enum entry DESC // io.github.kidx/Direction.DESC|null[0]
