@@ -21,8 +21,8 @@ fresh clone is a `diff -r`:
 
 ```sh
 git clone --depth 1 https://github.com/JuulLabs/indexeddb.git /tmp/idb
-diff -r /tmp/idb/core/src/webMain/kotlin     kidx-core/src/webMain/vendor/core
-diff -r /tmp/idb/external/src/webMain/kotlin kidx-core/src/webMain/vendor/external
+diff -r /tmp/idb/core/src/webMain/kotlin     src/webMain/vendor/core
+diff -r /tmp/idb/external/src/webMain/kotlin src/webMain/vendor/external
 ```
 
 ## Modifications

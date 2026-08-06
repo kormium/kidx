@@ -13,7 +13,7 @@ under the Apache License, Version 2.0.
     Copyright Juul Labs, Inc.
     https://github.com/JuulLabs/indexeddb
 
-The bundled sources live in kidx-core/src/webMain/vendor/ and retain their
+The bundled sources live in src/webMain/vendor/ and retain their
 original `com.juul.indexeddb` package names. The upstream revision they were
 taken from, and every modification kidx makes to them, are recorded in
-kidx-core/src/webMain/vendor/VENDOR.md.
+src/webMain/vendor/VENDOR.md.

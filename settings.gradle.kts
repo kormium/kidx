@@ -5,11 +5,11 @@ pluginManagement {
     }
 }
 
+// A single-project build: kidx is one library, so the root *is* the library. There is no
+// `kidx-core`, because there is nothing for it to be the core of — one module, one `webMain`
+// source set shared by the js and wasmJs targets, one engine.
+//
+// `kidx-observe` (see SPEC.md, Roadmap) is the first thing that would genuinely be a second module,
+// because it is optional for consumers. Adding it means moving this project's sources into a
+// subproject and pinning `artifactId = "kidx"` so the published coordinate does not change.
 rootProject.name = "kidx"
-
-// One module for now. The DSL and the engine live together because the split the spec originally
-// sketched (a platform-free `kidx-core` over a `kidx-indexeddb` engine) has no justification: the
-// value codec speaks `kotlin.js.JsAny`, so every source set here is a web source set anyway, and
-// there is exactly one engine. `kidx-observe` (see SPEC.md, Roadmap) is the module that will
-// genuinely be separate, because it is optional for consumers.
-include("kidx-core")

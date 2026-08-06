@@ -6,11 +6,10 @@ agent (human or Claude) can pick up the work without re-deriving any of it. Read
 writing code — several approaches below were considered and explicitly rejected, and re-proposing them
 wastes a round trip.
 
-What exists on disk: `settings.gradle.kts` with one module (`kidx-core`), the Gradle wrapper, the
-binary-compatibility validator, and the vendored JuulLabs sources under
-`kidx-core/src/webMain/vendor/` with their provenance and the changes they still need recorded in
-`VENDOR.md`. Reading that code answered three open questions and contradicted one decision; both are
-folded into the text below.
+What exists on disk: a single-project Gradle build (the root *is* the library), the wrapper, the
+binary-compatibility validator, and the vendored JuulLabs sources under `src/webMain/vendor/` with
+their provenance and the changes they still need recorded in `VENDOR.md`. Reading that code answered
+three open questions and contradicted one decision; both are folded into the text below.
 
 ## What this is
 
@@ -64,7 +63,7 @@ lost — only postponed.
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
-│  kidx-core  (js + wasmJs, one `webMain` source set)                  │
+│  kidx  —  one project, one `webMain` source set, js + wasmJs          │
 │                                                                      │
 │  src/webMain/kotlin — the DSL                                        │
 │    Row, Field/FieldType, Store, Index, Schema/Migration, Query,      │
@@ -75,12 +74,18 @@ lost — only postponed.
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-**One module, not two.** An earlier draft split a platform-free `kidx-core` from a `kidx-indexeddb`
-engine. That split had exactly one justification — keeping the DSL free of platform types — and it
-does not survive contact with the code: `FieldType` converts values to and from `kotlin.js.JsAny`, so
-every source set here is a web source set regardless. With the justification gone and exactly one
-engine to hide, a second module would be structure for its own sake. `kidx-observe` (Roadmap) is the
-module that will genuinely be separate, because it is optional for consumers.
+**One project, and not even a `kidx-core` inside it.** An earlier draft split a platform-free
+`kidx-core` from a `kidx-indexeddb` engine. That split had exactly one justification — keeping the DSL
+free of platform types — and it does not survive contact with the code: `FieldType` converts values to
+and from `kotlin.js.JsAny`, so every source set here is a web source set regardless. With the
+justification gone and exactly one engine to hide, a second module would be structure for its own sake;
+and once there is only one module, naming it `-core` promises a sibling that does not exist. So the
+root project is the library, published as `io.github.kidx:kidx`.
+
+The first thing that would genuinely be a second module is `kidx-observe` (Roadmap), because it is
+optional for consumers. When it lands, this project's sources move into a subproject with
+`artifactId = "kidx"` pinned so the coordinate does not change — a mechanical move, and a cheaper
+price than carrying an empty multi-module scaffold until then.
 
 The vendored code lives in its own source directory rather than its own module, in the upstream module
 layout (`vendor/core`, `vendor/external`), so re-checking it against a fresh clone is a `diff -r`. It
@@ -1053,9 +1058,9 @@ that upstream configures *no* `nodejs()` target, which bears on the test questio
 2. **Test strategy** — browser-only, `fake-indexeddb`-first, or both (see "Testing"). Sharpened by the
    skeleton: the vendored build declares only `browser()`, so a Node-based test target is something
    kidx would have to add rather than inherit.
-3. **Artifact coordinates and publishing.** `io.github.kidx` is the group; whether there is a
-   `kidx-bom` (as Kormium has) only matters once there is more than one module, i.e. when
-   `kidx-observe` lands. The publish plugin is not wired up yet.
+3. **Publishing.** The coordinate is `io.github.kidx:kidx`; a `kidx-bom` (as Kormium has) only becomes
+   meaningful once there is more than one artifact, i.e. when `kidx-observe` lands. The publish plugin
+   is not wired up yet.
 4. **Error hierarchy.** Kormium's typed exceptions (`ResultMappingException`,
    `ConcurrencyConflictException`, `MigrationChecksumException`) have IndexedDB counterparts worth
    naming: `ConstraintError`, `QuotaExceededError`, `AbortError`, blocked-by-another-context,
