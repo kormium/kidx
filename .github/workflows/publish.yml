@@ -44,6 +44,13 @@ jobs:
           ./gradlew apiCheck jsNodeTest jsBrowserTest wasmJsBrowserTest
           -PenableBrowserTests=true -Pversion=${{ steps.version.outputs.value }}
 
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: build/reports/tests
+
       - name: Publish to Maven Central
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}

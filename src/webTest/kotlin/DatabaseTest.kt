@@ -301,12 +301,30 @@ class DatabaseTest {
     @Test
     fun migrationsReplayOnlyWhatIsNew() = runTest {
         installIndexedDb()
-        deleteDatabase(appSchema.databaseName)
-        openDatabase(appSchema).close()
-        val v2 = Schema(
-            appSchema.databaseName,
-            appSchema.migrations + Migration(2, listOf(SchemaStep.DropIndex("users", "byName"))),
+        // Its own database, not the shared one: this is the only test that upgrades a version, and an
+        // upgrade is blocked while any other connection to the same database is still open. In a browser
+        // the whole suite shares one page and one origin, and `IDBDatabase.close()` finishes
+        // asynchronously — so borrowing the shared database made this racy against every other test.
+        // fake-indexeddb under Node never showed it; a real engine did, on the second CI run.
+        val name = "kidx-migration-test"
+        deleteDatabase(name)
+
+        val v1 = Schema(
+            name,
+            listOf(
+                Migration(
+                    1,
+                    listOf(
+                        SchemaStep.CreateStore(Users),
+                        SchemaStep.AddIndex(Users, Users.byEmail),
+                        SchemaStep.AddIndex(Users, Users.byName),
+                    ),
+                ),
+            ),
         )
+        openDatabase(v1).close()
+
+        val v2 = Schema(name, v1.migrations + Migration(2, listOf(SchemaStep.DropIndex("users", "byName"))))
         val upgraded = openDatabase(v2)
         assertEquals(2, upgraded.version)
         upgraded.close()
