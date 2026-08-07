@@ -264,5 +264,13 @@ private fun encodeTuple(index: Index<*>, values: List<Any?>, tail: Boolean): JsA
         encoded += index.fields[position].encodeAny(value!!)
     }
     if (tail) encoded += jsEmptyArray()
-    return if (encoded.size == 1) encoded.single() else encoded.toJsArray()
+    // A single-field index's `KeyPath` is one field name, so its stored keys are bare values; a
+    // compound index's `KeyPath` is several, so its stored keys are *always* arrays — even for a bound
+    // that pins only a prefix of them. Branching on `encoded.size` instead of `index.fields.size` used
+    // to unwrap a one-field prefix of a compound index to a bare value: IndexedDB then compared that
+    // bare value against the index's array-shaped keys by cross-type ordering (a string sorts below
+    // every array, unconditionally), so the bound matched nothing on that side — and, paired with the
+    // array-shaped bound on the other side, could admit a lexicographically-adjacent key's rows too,
+    // rather than only the ones with the pinned prefix.
+    return if (index.fields.size == 1) encoded.single() else encoded.toJsArray()
 }

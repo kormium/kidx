@@ -5,6 +5,21 @@ may break API — and two changes are already known to be breaking when they lan
 *before* `1.0`: type-level index arity, and whatever finally enforces the suspend discipline (see
 SPEC.md's Roadmap and open questions).
 
+## 0.1.1
+
+### Fixed
+
+- **A query pinning only a prefix of a compound index leaked rows of an unrelated key.** `find`/`stream`
+  (and anything built on them, like `Store.observe`) on a multi-field index, constrained with `eq` on the
+  leading field(s) and no trailing range — e.g. `Cards.find(Cards.byUser) { Cards.userId eq id }` — encoded
+  its lower bound as a bare value instead of an array whenever the *query* pinned exactly one field,
+  regardless of how many fields the *index* actually had. IndexedDB then compared that bare value against
+  the index's array-shaped stored keys by cross-type ordering (a string always sorts below any array), so
+  the lower bound matched nothing — and paired with the correctly array-shaped upper bound, could admit a
+  lexicographically-earlier key's rows too. Found via a real cross-collection data leak in a downstream
+  app. The bound now keys off the index's own field count rather than how many values a given query
+  happens to encode.
+
 ## 0.1.0
 
 The first version: everything below is new.
